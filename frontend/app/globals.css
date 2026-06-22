@@ -5,3 +5,15 @@
 html, body, #__next {
   height: 100%;
 }
+
+/* Typography and base colors for the app */
+body {
+  @apply bg-slate-950 text-slate-100 font-sans;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Utility: container centered */
+.app-container {
+  @apply max-w-6xl mx-auto px-4 sm:px-6 lg:px-8;
+}

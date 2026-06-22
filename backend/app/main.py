@@ -3,6 +3,7 @@ from typing import List
 
 import logging
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
 
 from .database import engine
@@ -46,6 +47,34 @@ def list_fixtures():
     with Session(engine) as session:
         partidos: List[Partido] = session.exec(select(Partido)).all()
         # Convertir a dicts para serializar fácilmente
+        return [p.dict() for p in partidos]
+
+
+# Configurar CORS para permitir peticiones desde el frontend en desarrollo
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/partidos")
+def api_list_partidos():
+    """Devuelve todos los partidos ordenados por fecha."""
+    with Session(engine) as session:
+        partidos: List[Partido] = session.exec(select(Partido).order_by(Partido.date)).all()
+        return [p.dict() for p in partidos]
+
+
+@app.get("/api/partidos/finalizados")
+def api_list_partidos_finalizados():
+    """Devuelve únicamente los partidos con estado 'FT' (finalizados)."""
+    with Session(engine) as session:
+        partidos: List[Partido] = session.exec(
+            select(Partido).where(Partido.status == "FT").order_by(Partido.date)
+        ).all()
         return [p.dict() for p in partidos]
 
 
