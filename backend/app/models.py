@@ -1,29 +1,40 @@
-from sqlmodel import SQLModel, Field, Relationship
+from sqlmodel import SQLModel, Field
 from typing import Optional
 from datetime import datetime
 
 
 class Team(SQLModel, table=True):
+    """Representa una selección o equipo."""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     group: Optional[str] = None
 
 
 class Partido(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    local_id: Optional[int] = Field(foreign_key="team.id")
-    visitante_id: Optional[int] = Field(foreign_key="team.id")
-    goles_local: Optional[int] = None
-    goles_visitante: Optional[int] = None
-    fecha: Optional[datetime] = None
-    estado: str = Field(default="programado")  # 'programado' o 'finalizado'
+    """Modelo principal para almacenar fixtures provenientes de la API.
 
-    # Relaciones ligeras; para queries complejas usar joins explícitos
-    local: Optional[Team] = Relationship(sa_relationship_kwargs={"lazy": "joined"})
-    visitante: Optional[Team] = Relationship(sa_relationship_kwargs={"lazy": "joined"})
+    Campos requeridos por la especificación:
+    - fixture_id: mapea al ID único de la API (indexado y único)
+    - date: fecha y hora del partido
+    - home_team / away_team: nombres de las selecciones
+    - home_score / away_score: goles (None si no se jugó)
+    - status: estado del partido (ej. 'NS', 'FT')
+    - home_xg / away_xg: xG calculado por el backend
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    fixture_id: int = Field(index=True, unique=True)
+    date: datetime
+    home_team: str
+    away_team: str
+    home_score: Optional[int] = None
+    away_score: Optional[int] = None
+    status: str = Field(default="NS")
+    home_xg: Optional[float] = None
+    away_xg: Optional[float] = None
 
 
 class EstadisticasPartido(SQLModel, table=True):
+    """Tabla opcional para estadísticas adicionales enlazadas por partido."""
     id: Optional[int] = Field(default=None, primary_key=True)
     partido_id: Optional[int] = Field(foreign_key="partido.id")
     xg_local: Optional[float] = None
