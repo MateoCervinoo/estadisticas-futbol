@@ -8,8 +8,9 @@ import sys
 try:
     # Importar módulos principales para detectar import cycles
     from app.database import engine, init_db
-    from app.models import Team, Partido, EstadisticasPartido
-    from app.dixoncoles import fit_dixon_coles, predict_exact_score_matrix
+    from app.models import Equipo, Partido, EstadisticasPartido
+    # fit_dixon_coles was moved out; import only prediction function
+    from app.dixoncoles import predict_exact_score_matrix
 except Exception as e:
     print("ERROR importing backend modules:", e)
     sys.exit(1)

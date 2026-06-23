@@ -27,8 +27,11 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/estadisticas
       - PYTHONUNBUFFERED=1
+      - API_FOOTBALL_KEY=48845f6680654134b9cb9b1f00bec169
+      - CSV_DATA_PATH=/app/data/results.csv
     volumes:
       - ./backend:/app:cached
+      - ./data:/app/data:cached
     ports:
       - "8000:8000"
 
