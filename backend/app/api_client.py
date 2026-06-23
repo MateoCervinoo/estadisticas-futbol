@@ -14,43 +14,100 @@ errores externos provoquen un 500 en el backend.
 from typing import List, Dict, Any, Optional
 import os
 import logging
+import time
 
 import requests
 
 logger = logging.getLogger(__name__)
 
+# URL base de football-data.org (v4)
+URL_BASE = "https://api.football-data.org/v4"
+
 
 class APIFootballClient:
     def __init__(self, api_key: Optional[str] = None, timeout: int = 10):
+        # Prefer explicit argument, otherwise read from environment
         self.api_key = api_key or os.getenv("API_FOOTBALL_KEY")
         self.timeout = timeout
-        self.base_url = "https://api-football-v1.p.rapidapi.com/v3"
-        # RapidAPI host header commonly used for this API
-        self.host_header = "api-football-v1.p.rapidapi.com"
+        # Use the official API-Sports base URL
+        self.base_url = URL_BASE
+
+        # Allow overriding which league ids to fetch via env var (comma-separated ids)
+        leagues_env = os.getenv("API_FOOTBALL_LEAGUES")
+        if leagues_env:
+            try:
+                self.league_ids = [int(x.strip()) for x in leagues_env.split(",") if x.strip()]
+            except Exception:
+                logger.warning("API_FOOTBALL_LEAGUES contains non-integer values; ignoring")
+                self.league_ids = [1]
+        else:
+            # Default to league id 1 (commonly World Cup in many sample datasets).
+            # The user may override this via the API_FOOTBALL_LEAGUES env var.
+            self.league_ids = [1]
 
         if not self.api_key:
             logger.warning("API_FOOTBALL_KEY not set — APIFootballClient running in MOCK mode")
             self.mock = True
         else:
             self.mock = False
-            self.headers = {
-                "x-rapidapi-key": self.api_key,
-                "x-rapidapi-host": self.host_header,
-            }
 
     def _safe_get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        try:
-            resp = requests.get(url, headers=getattr(self, 'headers', None), params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.exceptions.RequestException as e:
-            logger.error("Request to %s failed: %s", url, e)
-            return None
+        # Implementar reintentos defensivos y manejo específico para 429
+        api_key = self.api_key or os.getenv("API_FOOTBALL_KEY")
+        headers = {"X-Auth-Token": api_key} if api_key else {}
+
+        max_retries = 2
+        attempt = 0
+        while attempt < max_retries:
+            attempt += 1
+            try:
+                if not api_key:
+                    logger.warning("_safe_get called without API_FOOTBALL_KEY set; request will likely fail")
+
+                resp = requests.get(url, headers=headers, params=params, timeout=self.timeout)
+
+                # Debug logs: URL consultada
+                try:
+                    logger.info("URL consultada: %s", resp.url)
+                except Exception:
+                    logger.info("URL consultada no disponible en la respuesta")
+
+                # Manejo específico para 429 Too Many Requests
+                if resp.status_code == 429:
+                    logger.warning("Recibido 429 Too Many Requests para %s (attempt %s/%s). Esperando y reintentando...", url, attempt, max_retries)
+                    time.sleep(6)
+                    continue
+
+                # Intentamos parsear JSON para extraer keys útiles
+                data = None
+                try:
+                    data = resp.json()
+                except ValueError:
+                    logger.warning("Respuesta no es JSON válido (response.text es mostrado en DEBUG)")
+                    logger.debug("Response text: %s", resp.text)
+
+                if isinstance(data, dict):
+                    logger.warning("Errores de la API: %s", data.get('errors'))
+                    logger.info("Resultados según la API: %s", data.get('results'))
+
+                # Propagar errores HTTP no relacionados con rate limiting
+                resp.raise_for_status()
+
+                return data
+            except requests.exceptions.RequestException as e:
+                # Si es la última iteración, loguear y devolver None
+                logger.error("Request to %s failed on attempt %s/%s: %s", url, attempt, max_retries, e)
+                # Si la excepción corresponde a 429, ya la gestionamos arriba mediante status_code
+                if attempt < max_retries:
+                    logger.info("Esperando 6s antes de reintentar... (backoff)")
+                    time.sleep(6)
+                    continue
+                return None
 
     def get_world_cup_fixtures(self) -> List[Dict[str, Any]]:
-        """Devuelve una lista de fixtures del Mundial 2026.
+        """Devuelve una lista de fixtures para los leagues configurados.
 
-        Cada dict contiene: fixture_id, date, home_team, away_team, goals_home, goals_away, status
+        Cada dict contiene: fixture_id, date, home_team, away_team, goals_home, goals_away, status, league
         """
         if self.mock:
             # Datos de ejemplo (2 partidos) – útiles para desarrollo sin clave
@@ -63,6 +120,7 @@ class APIFootballClient:
                     "goals_home": None,
                     "goals_away": None,
                     "status": "NS",
+                    'league': 1,
                 },
                 {
                     "fixture_id": 102,
@@ -72,43 +130,82 @@ class APIFootballClient:
                     "goals_home": 2,
                     "goals_away": 1,
                     "status": "FT",
+                    'league': 1,
                 },
             ]
 
-        url = f"{self.base_url}/fixtures"
-        params = {"league": 1, "season": 2026}
-        data = self._safe_get(url, params=params)
-        if not data or 'response' not in data:
-            logger.error("Empty or invalid response from fixtures endpoint")
-            return []
+        # Endpoint fijo para obtener todos los matches del Mundial
+        url = f"{self.base_url}/competitions/WC/matches"
+        # No enviamos parámetros de fecha para evitar errores 400 y simplificar el flujo
+        data = self._safe_get(url, params={})
+        # Guardar la lista completa y devolver solo los próximos partidos (SCHEDULED/TIMED)
+        matches = []
+        if data and isinstance(data, dict):
+            all_matches = data.get('matches', [])
+            self._last_matches = all_matches
+            for match in all_matches:
+                status_api = match.get('status')
+                if status_api in ('SCHEDULED', 'TIMED'):
+                    # Mapear campos básicos que usa el resto del sistema
+                    matches.append({
+                        'fixture_id': match.get('id'),
+                        'date': match.get('utcDate'),
+                        'home_team': match.get('homeTeam', {}).get('name'),
+                        'away_team': match.get('awayTeam', {}).get('name'),
+                        'goals_home': None,
+                        'goals_away': None,
+                        'status': status_api,
+                        # dejar tournament en sync.py (se establecerá a 'Mundial')
+                    })
+        else:
+            self._last_matches = []
 
+        return matches
         fixtures = []
-        for item in data.get('response', []):
-            f = item.get('fixture', {})
-            teams = item.get('teams', {})
-            goals = item.get('goals', {})
+        if not data or 'matches' not in data:
+            logger.warning("Empty/invalid response from football-data matches endpoint")
+            return fixtures
 
-            fixture_id = f.get('id')
-            date = f.get('date')
-            status = f.get('status', {}).get('short') if isinstance(f.get('status'), dict) else f.get('status')
+        for match in data.get('matches', []):
+            # football-data match structure
+            fixture_id = match.get('id')
+            date = match.get('utcDate')
+            status_api = match.get('status')  # e.g. 'FINISHED', 'SCHEDULED', 'IN_PLAY', 'TIMED'
 
-            home_team = teams.get('home', {}).get('name') if teams.get('home') else None
-            away_team = teams.get('away', {}).get('name') if teams.get('away') else None
+            # Map API statuses to local shorthand
+            status_map = {
+                'FINISHED': 'FT',
+                'IN_PLAY': 'IN_PLAY',
+                'PAUSED': 'IN_PLAY',
+                'SCHEDULED': 'NS',
+                'TIMED': 'TIMED',
+                'POSTPONED': 'POSTPONED',
+                'CANCELLED': 'CANCELLED',
+            }
+            status = status_map.get(status_api, status_api)
 
-            goals_home = goals.get('home')
-            goals_away = goals.get('away')
+            home_team = None
+            away_team = None
+            try:
+                home_team = match.get('homeTeam', {}).get('name')
+                away_team = match.get('awayTeam', {}).get('name')
+            except Exception:
+                logger.exception("Error parsing teams from match: %s", match)
 
-            fixtures.append(
-                {
-                    'fixture_id': fixture_id,
-                    'date': date,
-                    'home_team': home_team,
-                    'away_team': away_team,
-                    'goals_home': goals_home,
-                    'goals_away': goals_away,
-                    'status': status,
-                }
-            )
+            # Goals usually under score.fullTime
+            full_time = match.get('score', {}).get('fullTime', {}) or {}
+            goals_home = full_time.get('home')
+            goals_away = full_time.get('away')
+
+            fixtures.append({
+                'fixture_id': fixture_id,
+                'date': date,
+                'home_team': home_team,
+                'away_team': away_team,
+                'goals_home': goals_home,
+                'goals_away': goals_away,
+                'status': status,
+            })
 
         return fixtures
 
@@ -121,6 +218,26 @@ class APIFootballClient:
         - shots_outside_box: {'home': int, 'away': int}
         Si no hay datos devuelve valores None.
         """
+        # Prefer buscar en el último payload completo (evitar consultas individuales por ID)
+        if hasattr(self, '_last_matches') and self._last_matches:
+            for m in self._last_matches:
+                if m.get('id') == fixture_id:
+                    # Intentar extraer estadísticas si están presentes
+                    stats = m.get('statistics') or m.get('stats') or {}
+                    # Normalizar forma esperada: dict con 'shots_inside_box'/'shots_outside_box'
+                    # En la mayoría de respuestas públicas no están disponibles, así que retornamos vacíos
+                    if stats:
+                        # Intentar mapear a la estructura que _compute_xg_from_metrics espera
+                        # Este bloque es defensivo; la estructura exacta de la API puede variar.
+                        shots_inside = {'home': None, 'away': None}
+                        shots_outside = {'home': None, 'away': None}
+                        # No hay forma estándar garantizada, así que devolvemos empty_metrics si no hay datos claros
+                        # Caerá más abajo a empty_metrics
+                        pass
+                    break
+
+        # If no cached detailed stats available, do NOT make an individual HTTP request per fixture
+        # to avoid hitting rate limits. Return empty metrics instead.
         if self.mock:
             # Datos simulados: mapeados por fixture_id para reproducibilidad
             mock_stats = {
@@ -141,68 +258,27 @@ class APIFootballClient:
                 'shots_outside_box': {'home': None, 'away': None},
             })
 
-        url = f"{self.base_url}/fixtures/statistics"
-        params = {"fixture": fixture_id}
-        data = self._safe_get(url, params=params)
-        if not data or 'response' not in data:
-            logger.error("Empty or invalid response from fixtures/statistics endpoint for fixture %s", fixture_id)
-            return {
-                'shots_on_goal': {'home': None, 'away': None},
-                'shots_inside_box': {'home': None, 'away': None},
-                'shots_outside_box': {'home': None, 'away': None},
-            }
+        # Try to fetch match details from football-data.org
+        url = f"{self.base_url}/matches/{fixture_id}"
+        data = self._safe_get(url)
 
-        # The response is generally a list, one item per team with statistics list
-        # We'll extract the three metrics by name (case-insensitive substring matching)
-        def _find_stat(stats_list, keys):
-            for entry in stats_list:
-                t = entry.get('type', '')
-                v = entry.get('value')
-                if not isinstance(t, str):
-                    continue
-                lower = t.lower()
-                for k in keys:
-                    if k in lower:
-                        return v
-            return None
-
-        # initialize
-        result = {
+        # Default empty metrics
+        empty_metrics = {
             'shots_on_goal': {'home': None, 'away': None},
             'shots_inside_box': {'home': None, 'away': None},
             'shots_outside_box': {'home': None, 'away': None},
         }
 
-        for team_stat in data.get('response', []):
-            team = team_stat.get('team', {})
-            side = 'home' if team.get('id') and team.get('name') else None
-            # API usually doesn't mark home/away here, statistical entries are paired in order —
-            # we will use the 'team' object name to determine which side by matching with fixture info
-            stats_list = team_stat.get('statistics', [])
+        if not data:
+            logger.debug("No data returned for match metrics %s", fixture_id)
+            return empty_metrics
 
-            # Extract metrics by checking possible key substrings
-            sog = _find_stat(stats_list, ['shots on goal', 'shots on target', 'shots on'])
-            inside = _find_stat(stats_list, ['insidebox', 'inside box', 'shots inside', 'shots insidebox'])
-            outside = _find_stat(stats_list, ['outsidebox', 'outside box', 'shots outside', 'shots outsidebox'])
+        # football-data may return match object under 'match' or 'matches'
+        match = data.get('match') or (data.get('matches')[0] if data.get('matches') else None)
+        if not match:
+            logger.debug("No match object found in metrics response for %s", fixture_id)
+            return empty_metrics
 
-            # Determine whether this is home or away by comparing team name to fixture data
-            # We need fixture info to disambiguate — fetch it if available
-            # As a fallback, assign sequentially: first entry => home, second => away
-            # Implement fallback mapping
-            if 'fixture_teams_cache' not in locals():
-                fixture_teams_cache = None
-
-            # Use ordering fallback: first processed -> home, second -> away
-            if result['shots_on_goal']['home'] is None and result['shots_on_goal']['away'] is None:
-                # assume first team is home
-                dest = 'home'
-            elif result['shots_on_goal']['away'] is None:
-                dest = 'away'
-            else:
-                dest = 'away'
-
-            result['shots_on_goal'][dest] = sog
-            result['shots_inside_box'][dest] = inside
-            result['shots_outside_box'][dest] = outside
-
-        return result
+        # If there were detailed statistics, parse them here. For now, return empty_metrics
+        logger.debug("Match details fetched for %s but no detailed shot statistics available in response", fixture_id)
+        return empty_metrics

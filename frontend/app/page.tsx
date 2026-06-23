@@ -51,6 +51,8 @@ export default function Home() {
   // single selectedMatch controls any open modal; modalMode decides which modal to show
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
+  const [prediction, setPrediction] = useState<any | null>(null)
+  const [predLoading, setPredLoading] = useState<boolean>(false)
 
   // derive upcoming and results
   const upcoming = partidos ? partidos.filter((p) => p.status === 'NS') : []
@@ -129,6 +131,7 @@ export default function Home() {
 
   const openSimulate = (p: Partido) => {
     setSelectedMatch(p)
+    setPrediction(null)
     setModalMode('simulate')
   }
 
@@ -140,7 +143,41 @@ export default function Home() {
   const closeModal = () => {
     setSelectedMatch(null)
     setModalMode(null)
+    setPrediction(null)
   }
+
+  // When a simulate modal opens, fetch prediction from backend
+  useEffect(() => {
+    let mounted = true
+    const fetchPrediction = async () => {
+      if (!selectedMatch || modalMode !== 'simulate') return
+      setPredLoading(true)
+      try {
+        // Use explicit backend base URL so client fetches hit the FastAPI server
+        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const res = await fetch(`${baseUrl}/api/partidos/${selectedMatch.fixture_id}/prediccion`)
+        if (!mounted) return
+        if (!res.ok) {
+          setPrediction(null)
+          setPredLoading(false)
+          return
+        }
+        const data = await res.json()
+        if (!mounted) return
+        setPrediction(data)
+      } catch (err) {
+        if (!mounted) return
+        setPrediction(null)
+      } finally {
+        if (mounted) setPredLoading(false)
+      }
+    }
+
+    fetchPrediction()
+    return () => {
+      mounted = false
+    }
+  }, [selectedMatch, modalMode])
 
   return (
     <main className="min-vh-100 bg-light p-5 text-dark">
@@ -301,22 +338,61 @@ export default function Home() {
               {/* Body: xG bars or simulate probs depending on modalMode */}
               {modalMode === 'simulate' ? (
                 <div>
-                  <p className="small text-muted">Procesando modelo Dixon-Coles (simulado)...</p>
-                  {(() => {
-                    const probs = simulateProbs(selectedMatch)
-                    return (
-                      <div>
-                        <div className="mb-2">Victoria Local: {probs.home}%</div>
-                        <div className="progress mb-3"><div className="progress-bar bg-success" style={{ width: `${probs.home}%` }} /></div>
-
-                        <div className="mb-2">Empate: {probs.draw}%</div>
-                        <div className="progress mb-3"><div className="progress-bar bg-secondary" style={{ width: `${probs.draw}%` }} /></div>
-
-                        <div className="mb-2">Victoria Visitante: {probs.away}%</div>
-                        <div className="progress mb-3"><div className="progress-bar bg-danger" style={{ width: `${probs.away}%` }} /></div>
+                  <p className="small text-muted">Predicción Dixon-Coles (MVP)...</p>
+                  {predLoading && <div className="text-muted small">Calculando probabilidades...</div>}
+                  {!predLoading && prediction && (
+                    <div>
+                      {/* Barra 1-X-2 compuesta */}
+                      <div className="d-flex align-items-center mb-2 small">
+                        <div className="me-2">Local</div>
+                        <div style={{ flex: 1 }}>
+                          <div className="progress" style={{ height: 18 }}>
+                            <div className="progress-bar bg-success" role="progressbar" style={{ width: `${prediction.home_win}%` }} aria-valuenow={prediction.home_win} aria-valuemin={0} aria-valuemax={100}>{prediction.home_win}%</div>
+                            <div className="progress-bar bg-secondary" role="progressbar" style={{ width: `${prediction.draw}%` }} aria-valuenow={prediction.draw} aria-valuemin={0} aria-valuemax={100}>{prediction.draw}%</div>
+                            <div className="progress-bar bg-danger" role="progressbar" style={{ width: `${prediction.away_win}%` }} aria-valuenow={prediction.away_win} aria-valuemin={0} aria-valuemax={100}>{prediction.away_win}%</div>
+                          </div>
+                        </div>
+                        <div className="ms-2">Visitante</div>
                       </div>
-                    )
-                  })()}
+
+                      {/* Score matrix table */}
+                      <div className="mt-3">
+                        {prediction?.score_matrix && Array.isArray(prediction.score_matrix) ? (
+                          <table className="table table-bordered table-sm text-center small">
+                            <thead>
+                              <tr>
+                                <th />
+                                {[0,1,2,3,4].map((g) => (<th key={`h-${g}`}>V {g}</th>))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[0,1,2,3,4].map((i) => (
+                                <tr key={`r-${i}`}>
+                                  <th scope="row">L {i}</th>
+                                  {Array.isArray(prediction.score_matrix[i]) ? (
+                                    prediction.score_matrix[i].map((cell: number, j: number) => {
+                                      const isMax = prediction.most_likely.home === i && prediction.most_likely.away === j
+                                      const cls = isMax ? 'bg-warning text-dark fw-bold' : ''
+                                      return (
+                                        <td key={`c-${i}-${j}`} className={cls}>{cell}%</td>
+                                      )
+                                    })
+                                  ) : (
+                                    <td key={`c-${i}-fallback`}>0%</td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <p className="text-muted small">No se pudo calcular la predicción. Datos insuficientes.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {!predLoading && !prediction && (
+                    <div className="text-muted small">No hay predicción disponible.</div>
+                  )}
                 </div>
               ) : (
                 <div>

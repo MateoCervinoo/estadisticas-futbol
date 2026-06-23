@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from .api_client import APIFootballClient
 from .models import Partido
 from .database import engine, init_db
+from .data_mapper import normalize_status, normalize_tournament
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -99,7 +100,24 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             away_team = f.get('away_team')
             goals_home = f.get('goals_home')
             goals_away = f.get('goals_away')
-            status = f.get('status') or "NS"
+            # Simplificación MVP: forzamos torneo='Mundial' y estado='NS' (próximos partidos)
+            status = 'NS'
+            tournament = 'Mundial'
+
+            # Mapear nombres de la API a IDs de Equipo si existe la tabla
+            home_team_id = None
+            away_team_id = None
+            try:
+                from .models import Equipo
+                h = session.exec(select(Equipo).where(Equipo.nombre_api == home_team)).first()
+                if h:
+                    home_team_id = h.id
+                a = session.exec(select(Equipo).where(Equipo.nombre_api == away_team)).first()
+                if a:
+                    away_team_id = a.id
+            except Exception:
+                home_team_id = None
+                away_team_id = None
 
             stmt = select(Partido).where(Partido.fixture_id == fixture_id)
             existing = session.exec(stmt).first()
@@ -112,9 +130,12 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                         date=date or datetime.utcnow(),
                         home_team=home_team or "",
                         away_team=away_team or "",
+                        home_team_id=home_team_id,
+                        away_team_id=away_team_id,
                         home_score=goals_home,
                         away_score=goals_away,
-                        status=status,
+                        status='NS',
+                        tournament='Mundial',
                     )
 
                     # Si ya está finalizado, calcular xG
@@ -129,41 +150,54 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                     created.append(fixture_id)
                     logger.info("Creado partido fixture_id=%s status=%s", fixture_id, status)
                 else:
-                    # Actualizar cuando pasa a finalizado desde otro estado
-                    if existing.status != 'FT' and status == 'FT':
+                    # UPSERT logic: only update when appropriate
+                    # If local is already finalizado, skip updates to avoid overwriting stable data
+                    local_final = existing.status == 'FT'
+                    api_final = status == 'FT' or status == 'IN_PLAY'
+
+                    # If the local record is final, only update if 2 hours have passed since match date
+                    # (approximation for "2 hours since its finalization") or if the API reports a different status
+                    allow_update_after_final_hours = False
+                    try:
+                        now = datetime.utcnow()
+                        # If existing.date is naive or tz-aware, handle accordingly (approximate)
+                        delta_seconds = (now - existing.date).total_seconds()
+                        allow_update_after_final_hours = delta_seconds >= (2 * 3600)
+                    except Exception:
+                        # If date parsing fails, be conservative and do not allow automatic final updates
+                        allow_update_after_final_hours = False
+
+                    if local_final and not allow_update_after_final_hours and status == 'FT':
+                        # local final and API also final but within 2 hours -> skip
+                        logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
+                        continue
+
+                    # Update when local is scheduled/timed and API reports in-play or finished,
+                    # or if the status has changed (including after 2 hours for final matches)
+                    if (existing.status in ('NS', 'TIMED') and api_final) or (existing.status != status) or (local_final and allow_update_after_final_hours and status == 'FT'):
                         existing.home_score = goals_home
                         existing.away_score = goals_away
-                        existing.status = status
+                        # Mantener simplificación: dejar como 'NS' y torneo 'Mundial'
+                        existing.status = 'NS'
+                        existing.tournament = 'Mundial'
 
-                        metrics = client.get_match_metrics(fixture_id)
-                        home_xg, away_xg = _compute_xg_from_metrics(metrics)
-                        existing.home_xg = home_xg
-                        existing.away_xg = away_xg
+                        # Actualizar referencia a Equipo si fue mapeada
+                        if home_team_id is not None:
+                            existing.home_team_id = home_team_id
+                        if away_team_id is not None:
+                            existing.away_team_id = away_team_id
+
+                        # If now final, compute xG
+                        if status == 'FT':
+                            metrics = client.get_match_metrics(fixture_id)
+                            home_xg, away_xg = _compute_xg_from_metrics(metrics)
+                            existing.home_xg = home_xg
+                            existing.away_xg = away_xg
 
                         session.add(existing)
                         session.commit()
                         updated.append(fixture_id)
-                        logger.info("Actualizado partido a FT fixture_id=%s", fixture_id)
-                    else:
-                        # No es change-to-FT: actualizamos campos básicos si han cambiado
-                        changed = False
-                        if existing.home_team != (home_team or existing.home_team):
-                            existing.home_team = home_team
-                            changed = True
-                        if existing.away_team != (away_team or existing.away_team):
-                            existing.away_team = away_team
-                            changed = True
-                        if date and existing.date != date:
-                            existing.date = date
-                            changed = True
-                        if existing.status != status:
-                            existing.status = status
-                            changed = True
-
-                        if changed:
-                            session.add(existing)
-                            session.commit()
-                            logger.info("Campos básicos actualizados para fixture_id=%s", fixture_id)
+                        logger.info("Actualizado/Upserted partido fixture_id=%s status=%s", fixture_id, status)
 
             except Exception as e:
                 msg = f"Error procesando fixture {fixture_id}: {e}"

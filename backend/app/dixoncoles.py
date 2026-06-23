@@ -1,213 +1,166 @@
+"""Dixon-Coles prediction utilities.
+
+This module provides a pure numerical prediction function `predict_match`
+and a helper `load_params` that reads model parameters from JSON. Training
+logic was moved to the separate entrenador/entrenador.py script.
 """
-Dixon-Coles model implementation adapted to use a real historical dataset
-provided by app.data_manager.get_combined_dataset().
-
-This module exposes:
-- fit_dixon_coles(): fit attack/defense parameters, home advantage and rho
-- predict_exact_score_matrix(home_team, away_team, model, max_goals=5)
-
-Design notes:
-- The dataset must be a pandas DataFrame with columns:
-  date, home_team, away_team, home_score, away_score, neutral (bool/0-1)
-- For non-neutral matches a scalar home advantage gamma is applied; for
-  neutral matches (e.g. most World Cup matches) gamma is not applied.
-- The likelihood uses independent Poissons for goals with a Dixon-Coles
-  adjustment (rho) applied to low-score outcomes (0-0,0-1,1-0,1-1).
-"""
-
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
+import math
 import numpy as np
-from scipy.optimize import minimize
-from scipy.special import gammaln
-
-from app.data_manager import get_combined_dataset
+import unicodedata
 
 
-def _prepare_data_from_df(df):
-    """Transforma el DataFrame esperado en arrays numéricos para el modelo.
+def predict_match(home_team: str, away_team: str, model: Dict[str, Any], max_goals: int = 4, neutral: Optional[bool] = True):
+    """Compute exact score probability matrix for home vs away using provided params.
 
-    df: pandas.DataFrame con columnas ['date','home_team','away_team','home_score','away_score','neutral']
-    Retorna: teams (list), map_team_to_idx (dict), arrays home_idx, away_idx, y_home, y_away, neutral_flag
+    New model format expects 'attack' and 'defense' to be dicts keyed by
+    normalized team name (strip + casefold). If old list-based format is
+    supplied, this function will attempt to adapt safely.
     """
-    teams = sorted(list(set(df['home_team']).union(set(df['away_team']))))
-    team_to_idx = {t: i for i, t in enumerate(teams)}
+    if not isinstance(model, dict):
+        raise ValueError('model must be a dict')
 
-    home_idx = df['home_team'].map(team_to_idx).to_numpy(dtype=int)
-    away_idx = df['away_team'].map(team_to_idx).to_numpy(dtype=int)
-    y_home = df['home_score'].to_numpy(dtype=int)
-    y_away = df['away_score'].to_numpy(dtype=int)
-    neutral = df['neutral'].astype(int).to_numpy(dtype=int)
+    def _norm(s: str) -> str:
+        try:
+            ss = s.lower().strip()
+        except Exception:
+            ss = str(s).lower().strip()
+        # remove diacritic marks after NFD normalization
+        return ''.join(c for c in unicodedata.normalize('NFD', ss) if unicodedata.category(c) != 'Mn')
 
-    return teams, team_to_idx, home_idx, away_idx, y_home, y_away, neutral
+    # prefer dict keyed access; support legacy list format if present
+    # Clean input names (remove leading/trailing whitespace) and expose params variable
+    home_name = home_team.strip() if isinstance(home_team, str) else str(home_team).strip()
+    away_name = away_team.strip() if isinstance(away_team, str) else str(away_team).strip()
+    params = model
 
+    atk = params.get('attack', {})
+    df = params.get('defense', {})
 
-def fit_dixon_coles(df=None, max_iter: int = 1000, verbose: bool = False) -> Dict[str, Any]:
-    """Entrena el modelo usando el DataFrame provisto por app.data_manager.get_combined_dataset().
+    # If legacy format with team_to_idx + list values, convert to dict keyed by normalized names
+    team_to_idx = model.get('team_to_idx')
+    if team_to_idx and isinstance(team_to_idx, dict):
+        # only convert if attack/defense are lists/tuples
+        if isinstance(atk, (list, tuple)) or isinstance(df, (list, tuple)):
+            atk_tmp = {}
+            def_tmp = {}
+            for name, idx in team_to_idx.items():
+                try:
+                    key = name.strip().casefold()
+                except Exception:
+                    key = str(name).strip().casefold()
+                try:
+                    atk_tmp[key] = float(atk[int(idx)])
+                except Exception:
+                    atk_tmp[key] = 1.0
+                try:
+                    def_tmp[key] = float(df[int(idx)])
+                except Exception:
+                    def_tmp[key] = 1.0
+            atk = atk_tmp
+            df = def_tmp
+    else:
+        # If pure list format without team_to_idx, fallback to empty dicts so lookups return default 1.0
+        if isinstance(atk, (list, tuple)):
+            atk = {}
+        if isinstance(df, (list, tuple)):
+            df = {}
 
-    Parámetros:
-    - df: opcional pandas.DataFrame; si no se provee se llama a get_combined_dataset()
-    - max_iter: iteraciones máximas para el optimizador
-
-    Retorna un dict con keys: teams, attack, defense, gamma (home adv), rho
-    """
-    import pandas as pd
-
-    if df is None:
-        df = get_combined_dataset()
-
-    # Validaciones básicas
-    required_cols = {'date', 'home_team', 'away_team', 'home_score', 'away_score', 'neutral'}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"DataFrame must contain columns: {required_cols}")
-
-    teams, team_to_idx, h_idx, a_idx, y_home, y_away, neutral = _prepare_data_from_df(df)
-    n_teams = len(teams)
-
-    # Initial parameters: small random noise around zero
-    rng = np.random.default_rng(42)
-    atk0 = rng.normal(0.0, 0.1, size=n_teams)
-    def0 = rng.normal(0.0, 0.1, size=n_teams)
-    gamma0 = 0.1  # home advantage
-    rho0 = 0.0
-
-    # Pack parameters: [atk(0..n-1), def(0..n-1), gamma, rho]
-    x0 = np.concatenate([atk0, def0, np.array([gamma0, rho0])])
-
-    # Precompute factorial logs for Poisson via gammaln for numerical stability
-    max_goal = max(int(y_home.max()), int(y_away.max()), 5)
-
-    def _log_poisson_pmf(k, lam):
-        # log P(K=k) = k*log(lam) - lam - log(k!)
-        return k * np.log(lam + 1e-12) - lam - gammaln(k + 1)
-
-    def _neg_log_likelihood(x):
-        atk = x[:n_teams]
-        df = x[n_teams:2 * n_teams]
-        gamma = x[-2]
-        rho = x[-1]
-
-        lambda_h = np.exp(atk[h_idx] - df[a_idx] + gamma * (1 - neutral))
-        lambda_a = np.exp(atk[a_idx] - df[h_idx] + gamma * 0)  # away side doesn't get gamma
-
-        # Poisson log-likelihoods
-        ll = np.sum(_log_poisson_pmf(y_home, lambda_h) + _log_poisson_pmf(y_away, lambda_a))
-
-        # Dixon-Coles adjustment for low-score games (0-0, 0-1, 1-0, 1-1)
-        # Following Dixon & Coles, we add log adjustment term for these combinations
-        # phi = 1 - rho * (1 - p0h - p1h) * (1 - p0a - p1a) ... simplified here
-        # Implement exact adjustment per the original paper for scores (0,0),(0,1),(1,0),(1,1)
-        # Compute small-score probabilities
-        adj = 0.0
-        for i in range(len(h_idx)):
-            lam_h = lambda_h[i]
-            lam_a = lambda_a[i]
-            p0h = np.exp(-lam_h)
-            p1h = p0h * lam_h
-            p0a = np.exp(-lam_a)
-            p1a = p0a * lam_a
-
-            if y_home[i] == 0 and y_away[i] == 0:
-                adj += np.log(1 + rho * (1 - p0h) * (1 - p0a) + 1e-12)
-            elif y_home[i] == 0 and y_away[i] == 1:
-                adj += np.log(1 - rho * p0h * (1 - p0a) + 1e-12)
-            elif y_home[i] == 1 and y_away[i] == 0:
-                adj += np.log(1 - rho * (1 - p0h) * p0a + 1e-12)
-            elif y_home[i] == 1 and y_away[i] == 1:
-                adj += np.log(1 + rho * p0h * p0a + 1e-12)
-
-        total_ll = ll + adj
-
-        # Regularization: small L2 to stabilize with many teams
-        reg = 1e-4 * (np.sum(atk ** 2) + np.sum(df ** 2) + gamma ** 2 + rho ** 2)
-
-        neg_ll = -total_ll + reg
-        if verbose:
-            print(f"neg_ll={neg_ll:.3f}")
-        return neg_ll
-
-    # Constraint: sum of attacks = 0 for identifiability
-    cons = ({'type': 'eq', 'fun': lambda x: np.sum(x[:n_teams])},)
-
-    res = minimize(_neg_log_likelihood, x0, method='SLSQP', constraints=cons, options={'maxiter': max_iter})
-
-    if not res.success:
-        raise RuntimeError(f"Optimización fallida: {res.message}")
-
-    x_opt = res.x
-    attack = x_opt[:n_teams]
-    defense = x_opt[n_teams:2 * n_teams]
-    gamma = float(x_opt[-2])
-    rho = float(x_opt[-1])
-
-    return {
-        'teams': teams,
-        'team_to_idx': team_to_idx,
-        'attack': attack.tolist(),
-        'defense': defense.tolist(),
-        'gamma': gamma,
-        'rho': rho,
-    }
-
-
-def predict_exact_score_matrix(home_team: str, away_team: str, model: Dict[str, Any], max_goals: int = 5, neutral: Optional[bool] = True):
-    """Genera la matriz P(i,j) de probabilidades exactas hasta max_goals.
-
-    home_team and away_team are strings matching the team names in the trained model.
-    neutral: if True, no home advantage is applied; if False, gamma is applied.
-    """
-    teams = model['teams']
-    team_to_idx = model['team_to_idx']
-    if home_team not in team_to_idx or away_team not in team_to_idx:
-        raise ValueError('Both teams must be present in the trained model')
-
-    i_home = team_to_idx[home_team]
-    i_away = team_to_idx[away_team]
-
-    atk = np.array(model['attack'])
-    df = np.array(model['defense'])
     gamma = float(model.get('gamma', 0.0))
-
-    # Apply home advantage only if not neutral
-    gamma_home = gamma if not neutral else 0.0
-
-    lambda_h = float(np.exp(atk[i_home] - df[i_away] + gamma_home))
-    lambda_a = float(np.exp(atk[i_away] - df[i_home] + 0.0))
-
-    P = np.zeros((max_goals + 1, max_goals + 1), dtype=float)
-    for i in range(max_goals + 1):
-        # compute Poisson pmf for home i
-        p_i = np.exp(-lambda_h) * lambda_h ** i / np.math.factorial(i)
-        for j in range(max_goals + 1):
-            p_j = np.exp(-lambda_a) * lambda_a ** j / np.math.factorial(j)
-            P[i, j] = p_i * p_j
-
-    # Optionally apply Dixon-Coles rho adjustment for low-scoring results
     rho = float(model.get('rho', 0.0))
-    if abs(rho) > 1e-8:
-        # Adjust cells (0,0),(0,1),(1,0),(1,1)
-        p0h = np.exp(-lambda_h)
-        p1h = p0h * lambda_h
-        p0a = np.exp(-lambda_a)
-        p1a = p0a * lambda_a
 
-        # original probabilities
-        # apply multiplicative adjustments similar to Dixon-Coles
-        P00 = P[0, 0]
-        P01 = P[0, 1]
-        P10 = P[1, 0]
-        P11 = P[1, 1]
+    # normalized keys (apply strip before normalizing)
+    hkey = _norm(home_name)
+    akey = _norm(away_name)
 
-        P[0, 0] = P00 * (1 + rho * p0h * p0a)
-        P[0, 1] = P01 * (1 - rho * p0h * p1a)
-        P[1, 0] = P10 * (1 - rho * p1h * p0a)
-        P[1, 1] = P11 * (1 + rho * p1h * p1a)
+    # For robust matching, normalize both supplied names and the dict keys
+    try:
+        atk_map = { _norm(str(k)): float(v) for k, v in atk.items() } if isinstance(atk, dict) else {}
+    except Exception:
+        atk_map = {}
+    try:
+        def_map = { _norm(str(k)): float(v) for k, v in df.items() } if isinstance(df, dict) else {}
+    except Exception:
+        def_map = {}
 
-    # Normalize to ensure sum to 1
-    P = P / P.sum()
+    lh = _norm(home_name)
+    la = _norm(away_name)
+
+    atk_h = float(atk_map.get(lh, 1.0))
+    df_a = float(def_map.get(la, 1.0))
+    atk_a = float(atk_map.get(la, 1.0))
+    df_h = float(def_map.get(lh, 1.0))
+
+    # Diagnostic print requested for immediate troubleshooting
+    try:
+        print(f"🚨 PREDICCIÓN: {home_name} (Atk: {atk_h}) vs {away_name} (Def de away: {df_a})")
+    except Exception:
+        # Don't let logging break prediction
+        pass
+
+    # No debug printing; lookups use normalized keys and default to 1.0 if missing
+
+    # apply home advantage only if not neutral
+    gamma_home = 0.0 if neutral else float(gamma)
+
+    # compute linear predictors and lambdas
+    try:
+        eta_h = float(atk_h - df_a + gamma_home)
+    except Exception:
+        eta_h = 0.0
+    try:
+        eta_a = float(atk_a - df_h)
+    except Exception:
+        eta_a = 0.0
+
+    # Clip to safe ranges and exponentiate safely
+    eta_h = float(np.clip(eta_h, -1000.0, 1000.0))
+    eta_a = float(np.clip(eta_a, -1000.0, 1000.0))
+    # Prevent overflow/underflow in exp
+    lambda_h = float(np.exp(np.maximum(eta_h, -700.0)))
+    lambda_a = float(np.exp(np.maximum(eta_a, -700.0)))
+
+    # Build joint Poisson matrix
+    P = np.zeros((max_goals + 1, max_goals + 1), dtype=float)
+    lam_h_safe = float(np.clip(lambda_h, 1e-12, 1e12))
+    lam_a_safe = float(np.clip(lambda_a, 1e-12, 1e12))
+
+    # Precompute Poisson pmfs for efficiency
+    pmf_h = [float(np.exp(-lam_h_safe) * (lam_h_safe ** k) / math.factorial(k)) for k in range(max_goals + 1)]
+    pmf_a = [float(np.exp(-lam_a_safe) * (lam_a_safe ** k) / math.factorial(k)) for k in range(max_goals + 1)]
+
+    for i in range(max_goals + 1):
+        for j in range(max_goals + 1):
+            P[i, j] = pmf_h[i] * pmf_a[j]
+
+    # Dixon-Coles small score adjustment (multiplicative)
+    if abs(rho) > 1e-12:
+        p0h = float(np.exp(-np.maximum(lambda_h, 1e-12)))
+        p1h = float(p0h * np.maximum(lambda_h, 1e-12))
+        p0a = float(np.exp(-np.maximum(lambda_a, 1e-12)))
+        p1a = float(p0a * np.maximum(lambda_a, 1e-12))
+
+        # adjust specific cells safely if they exist
+        if P.shape[0] > 0 and P.shape[1] > 0:
+            P[0, 0] = P[0, 0] * (1.0 + rho * p0h * p0a)
+        if P.shape[0] > 0 and P.shape[1] > 1:
+            P[0, 1] = P[0, 1] * (1.0 - rho * p0h * p1a)
+        if P.shape[0] > 1 and P.shape[1] > 0:
+            P[1, 0] = P[1, 0] * (1.0 - rho * p1h * p0a)
+        if P.shape[0] > 1 and P.shape[1] > 1:
+            P[1, 1] = P[1, 1] * (1.0 + rho * p1h * p1a)
+
+    total = float(np.nansum(P))
+    if not np.isfinite(total) or total <= 0.0:
+        # safe fallback: uniform matrix
+        size = max_goals + 1
+        uniform = np.full((size, size), 1.0 / (size * size), dtype=float)
+        return uniform.tolist()
+
+    P = P / total
     return P.tolist()
 
 
-if __name__ == "__main__":
-    # Prueba local rápida (requiere partidos en la DB)
-    m = fit_dixon_coles()
-    print(m)
+# keep compatibility name
+def predict_exact_score_matrix(home_team: str, away_team: str, model: Dict[str, Any], max_goals: int = 4, neutral: Optional[bool] = True):
+    return predict_match(home_team, away_team, model, max_goals=max_goals, neutral=neutral)
