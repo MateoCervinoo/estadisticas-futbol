@@ -8,7 +8,9 @@ Evitar importaciones circulares: no importa main.py.
 """
 from __future__ import annotations
 
+import csv
 import logging
+import os
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -21,6 +23,9 @@ from .data_mapper import normalize_status, normalize_tournament
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+FINAL_STATUSES = {'FT', 'FINISHED'}
+TRAINER_RESULTS_CSV = '/app/data/results.csv'
 
 
 def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
@@ -67,6 +72,29 @@ def _compute_xg_from_metrics(metrics: Dict[str, Any]) -> (Optional[float], Optio
         return None, None
 
 
+def _append_result_to_trainer_csv(partido: Partido) -> None:
+    os.makedirs(os.path.dirname(TRAINER_RESULTS_CSV), exist_ok=True)
+    file_exists = os.path.exists(TRAINER_RESULTS_CSV)
+    write_header = not file_exists or os.path.getsize(TRAINER_RESULTS_CSV) == 0
+
+    date_value = partido.date.date().isoformat() if partido.date else ''
+    with open(TRAINER_RESULTS_CSV, 'a', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=['date', 'home_team', 'away_team', 'home_score', 'away_score', 'tournament'],
+        )
+        if write_header:
+            writer.writeheader()
+        writer.writerow({
+            'date': date_value,
+            'home_team': partido.home_team,
+            'away_team': partido.away_team,
+            'home_score': partido.home_score,
+            'away_score': partido.away_score,
+            'tournament': partido.tournament,
+        })
+
+
 def sync_fixtures_and_metrics() -> Dict[str, Any]:
     """Sincroniza fixtures del Mundial y calcula métricas xG.
 
@@ -100,8 +128,7 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             away_team = f.get('away_team')
             goals_home = f.get('goals_home')
             goals_away = f.get('goals_away')
-            # Simplificación MVP: forzamos torneo='Mundial' y estado='NS' (próximos partidos)
-            status = 'NS'
+            status = f.get('status') or 'NS'
             tournament = 'Mundial'
 
             # Mapear nombres de la API a IDs de Equipo si existe la tabla
@@ -134,12 +161,12 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                         away_team_id=away_team_id,
                         home_score=goals_home,
                         away_score=goals_away,
-                        status='NS',
-                        tournament='Mundial',
+                        status=status,
+                        tournament=tournament,
                     )
 
                     # Si ya está finalizado, calcular xG
-                    if status == 'FT':
+                    if status in FINAL_STATUSES:
                         metrics = client.get_match_metrics(fixture_id)
                         home_xg, away_xg = _compute_xg_from_metrics(metrics)
                         partido.home_xg = home_xg
@@ -147,13 +174,16 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
 
                     session.add(partido)
                     session.commit()
+                    if status in FINAL_STATUSES:
+                        _append_result_to_trainer_csv(partido)
                     created.append(fixture_id)
                     logger.info("Creado partido fixture_id=%s status=%s", fixture_id, status)
                 else:
                     # UPSERT logic: only update when appropriate
                     # If local is already finalizado, skip updates to avoid overwriting stable data
-                    local_final = existing.status == 'FT'
-                    api_final = status == 'FT' or status == 'IN_PLAY'
+                    local_final = existing.status in FINAL_STATUSES
+                    api_final = status in FINAL_STATUSES or status == 'IN_PLAY'
+                    transitioned_to_final = not local_final and status in FINAL_STATUSES
 
                     # If the local record is final, only update if 2 hours have passed since match date
                     # (approximation for "2 hours since its finalization") or if the API reports a different status
@@ -167,19 +197,18 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                         # If date parsing fails, be conservative and do not allow automatic final updates
                         allow_update_after_final_hours = False
 
-                    if local_final and not allow_update_after_final_hours and status == 'FT':
+                    if local_final and not allow_update_after_final_hours and status in FINAL_STATUSES:
                         # local final and API also final but within 2 hours -> skip
                         logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
                         continue
 
                     # Update when local is scheduled/timed and API reports in-play or finished,
                     # or if the status has changed (including after 2 hours for final matches)
-                    if (existing.status in ('NS', 'TIMED') and api_final) or (existing.status != status) or (local_final and allow_update_after_final_hours and status == 'FT'):
+                    if (existing.status in ('NS', 'TIMED') and api_final) or (existing.status != status) or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES):
                         existing.home_score = goals_home
                         existing.away_score = goals_away
-                        # Mantener simplificación: dejar como 'NS' y torneo 'Mundial'
-                        existing.status = 'NS'
-                        existing.tournament = 'Mundial'
+                        existing.status = status
+                        existing.tournament = tournament
 
                         # Actualizar referencia a Equipo si fue mapeada
                         if home_team_id is not None:
@@ -188,7 +217,7 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                             existing.away_team_id = away_team_id
 
                         # If now final, compute xG
-                        if status == 'FT':
+                        if status in FINAL_STATUSES:
                             metrics = client.get_match_metrics(fixture_id)
                             home_xg, away_xg = _compute_xg_from_metrics(metrics)
                             existing.home_xg = home_xg
@@ -196,6 +225,8 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
 
                         session.add(existing)
                         session.commit()
+                        if transitioned_to_final:
+                            _append_result_to_trainer_csv(existing)
                         updated.append(fixture_id)
                         logger.info("Actualizado/Upserted partido fixture_id=%s status=%s", fixture_id, status)
 
