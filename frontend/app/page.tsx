@@ -3,6 +3,27 @@
 import React, { useEffect, useState } from 'react'
 import { getPartidos, Partido } from '../src/services/api'
 
+type ExactScore = {
+  home: number
+  away: number
+  prob: number
+}
+
+type ProbabilityKey = 'home_win' | 'draw' | 'away_win'
+
+const ARGENTINA_TIME_ZONE = 'America/Argentina/Buenos_Aires'
+
+const TOURNAMENT_LABELS: Record<string, string> = {
+  GROUP_STAGE: 'Fase de Grupos',
+  ROUND_OF_16: 'Octavos de Final',
+  QUARTER_FINALS: 'Cuartos de Final',
+  SEMI_FINALS: 'Semifinales',
+  THIRD_PLACE: 'Tercer Puesto',
+  FINAL: 'Final',
+  FIFA_WORLD_CUP: 'Mundial',
+  WORLD_CUP: 'Mundial',
+}
+
 export default function Home() {
   const [partidos, setPartidos] = useState<Partido[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -28,12 +49,11 @@ export default function Home() {
     }
   }, [])
 
-  const formatXG = (x: number | null) => (x === null || x === undefined ? '-' : x.toFixed(2))
   const formatScore = (s: number | null) => (s === null || s === undefined ? '-' : String(s))
   const formatDate = (iso: string) => {
     try {
-      const d = new Date(iso)
-      return d.toLocaleString(undefined, {
+      return new Date(iso).toLocaleString('es-AR', {
+        timeZone: ARGENTINA_TIME_ZONE,
         weekday: 'short',
         day: '2-digit',
         month: 'short',
@@ -44,30 +64,130 @@ export default function Home() {
       return iso
     }
   }
-  // UI states for tabs, filters and modals
-  const [tab, setTab] = useState<'upcoming' | 'results'>('upcoming')
+  const formatDateLabel = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('es-AR', {
+        timeZone: ARGENTINA_TIME_ZONE,
+        weekday: 'short',
+        day: '2-digit',
+        month: 'short',
+      })
+    } catch {
+      return iso
+    }
+  }
+
+  const dateKey = (iso: string) => {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: ARGENTINA_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(new Date(iso))
+
+      const year = parts.find((part) => part.type === 'year')?.value
+      const month = parts.find((part) => part.type === 'month')?.value
+      const day = parts.find((part) => part.type === 'day')?.value
+
+      return year && month && day ? `${year}-${month}-${day}` : iso.slice(0, 10)
+    } catch {
+      return iso.slice(0, 10)
+    }
+  }
+
+  const isPlayed = (p: Partido) => {
+    const hasScore = p.home_score !== null && p.home_score !== undefined && p.away_score !== null && p.away_score !== undefined
+    return hasScore || ['FT', 'AET', 'PEN'].includes(p.status)
+  }
+
+  const tournamentOf = (p: Partido) => {
+    const rawTournament = p.tournament?.trim()
+    if (!rawTournament) return 'Mundial'
+    return TOURNAMENT_LABELS[rawTournament] ?? rawTournament
+  }
+
+  const topExactScores = (predictionData: any): ExactScore[] => {
+    if (Array.isArray(predictionData?.score_matrix_flat)) {
+      return predictionData.score_matrix_flat
+        .filter((item: any) => Number.isFinite(Number(item?.prob)))
+        .map((item: any) => ({
+          home: Number(item.home),
+          away: Number(item.away),
+          prob: Number(item.prob),
+        }))
+        .sort((a: ExactScore, b: ExactScore) => b.prob - a.prob)
+        .slice(0, 3)
+    }
+
+    if (!Array.isArray(predictionData?.score_matrix)) return []
+
+    return predictionData.score_matrix
+      .flatMap((row: number[], home: number) =>
+        Array.isArray(row)
+          ? row.map((prob: number, away: number) => ({
+              home,
+              away,
+              prob: Number(prob),
+            }))
+          : []
+      )
+      .filter((item: ExactScore) => Number.isFinite(item.prob))
+      .sort((a: ExactScore, b: ExactScore) => b.prob - a.prob)
+      .slice(0, 3)
+  }
+
+  const favoriteProbability = (predictionData: any): ProbabilityKey => {
+    const values: Record<ProbabilityKey, number> = {
+      home_win: Number(predictionData?.home_win ?? 0),
+      draw: Number(predictionData?.draw ?? 0),
+      away_win: Number(predictionData?.away_win ?? 0),
+    }
+
+    return (Object.entries(values).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'home_win') as ProbabilityKey
+  }
+
+  const exactScoreMatrix = (predictionData: any): number[][] => {
+    if (!Array.isArray(predictionData?.score_matrix)) return []
+
+    return predictionData.score_matrix.slice(0, 5).map((row: any[]) =>
+      Array.isArray(row)
+        ? row.slice(0, 5).map((cell) => {
+            const value = Number(cell)
+            return Number.isFinite(value) ? value : 0
+          })
+        : []
+    )
+  }
+
+  const heatmapClass = (value: number, maxValue: number) => {
+    if (maxValue <= 0 || value <= 0) return 'bg-white'
+
+    const intensity = value / maxValue
+    if (intensity >= 0.85) return 'bg-primary text-white fw-bold'
+    if (intensity >= 0.6) return 'bg-info text-white fw-semibold'
+    if (intensity >= 0.35) return 'bg-info-subtle fw-semibold'
+    if (intensity >= 0.15) return 'bg-primary-subtle'
+    return 'bg-white'
+  }
+
+  // UI states for filters and modals
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
+  const [statusFilter, setStatusFilter] = useState<'Todos' | 'Por jugar' | 'Jugados'>('Todos')
   // single selectedMatch controls any open modal; modalMode decides which modal to show
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
   const [prediction, setPrediction] = useState<any | null>(null)
   const [predLoading, setPredLoading] = useState<boolean>(false)
 
-  // derive upcoming and results
-  const upcoming = partidos ? partidos.filter((p) => p.status === 'NS') : []
-  const results = partidos ? partidos.filter((p) => p.status === 'FT') : []
+  const allMatches = partidos ?? []
+  const competitionOptions = ['Todos', ...Array.from(new Set(allMatches.map(tournamentOf).filter(Boolean)))]
 
-  // build a list of unique dates (as ISO date) for the calendar bar based on upcoming matches
+  // build a list of unique dates for the calendar bar based on every match, including past days
   const uniqueDates = Array.from(
-    new Map(
-      (upcoming || []).map((p) => {
-        const d = new Date(p.date)
-        const iso = d.toISOString().slice(0, 10)
-        return [iso, d]
-      })
-    ).entries()
-  ).map(([iso]) => iso)
+    new Set(allMatches.map((p) => dateKey(p.date)))
+  ).sort()
 
   // map team names to flag-icon two-letter codes (extend as needed)
   const teamToFlag: Record<string, string> = {
@@ -86,50 +206,19 @@ export default function Home() {
     return `fi fi-${code}`
   }
 
-  const competitionOf = (p: Partido) => {
-    // lightweight heuristic mapping for demo purposes
-    const t = (p.home_team + ' ' + p.away_team).toLowerCase()
-    if (t.includes('argentina') || t.includes('brazil')) return 'Copa América'
-    if (t.includes('world') || t.includes('fifa') || t.includes('worldcup')) return 'Mundial'
-    return 'Clasificatorias'
-  }
+  const filteredMatches = allMatches.filter((p) => {
+    const matchesDate = !selectedDate || dateKey(p.date) === selectedDate
+    const matchesCompetition = !competitionFilter || competitionFilter === 'Todos' || tournamentOf(p) === competitionFilter
+    const matchesStatus =
+      statusFilter === 'Todos' ||
+      (statusFilter === 'Jugados' && isPlayed(p)) ||
+      (statusFilter === 'Por jugar' && !isPlayed(p))
 
-  // filtered lists by date and competition
-  const filteredUpcoming = upcoming.filter((p) => {
-    if (selectedDate) {
-      return new Date(p.date).toISOString().slice(0, 10) === selectedDate
-    }
-    return true
+    return matchesDate && matchesCompetition && matchesStatus
   })
-
-  const filteredResults = results.filter((p) => {
-    if (competitionFilter && competitionFilter !== 'Todos') {
-      return competitionOf(p) === competitionFilter
-    }
-    return true
-  })
-
-  // simulate probabilities for the simulate modal
-  const simulateProbs = (p: Partido) => {
-    const hx = p.home_xg ?? 1
-    const ax = p.away_xg ?? 1
-    let home = hx / (hx + ax + 0.0001)
-    let away = ax / (hx + ax + 0.0001)
-    let draw = 0.15
-    // normalize and reduce draw when gap is big
-    const gap = Math.abs(hx - ax)
-    draw = Math.max(0.05, 0.25 - gap * 0.03)
-    const sum = home + away
-    home = home * (1 - draw) / sum
-    away = away * (1 - draw) / sum
-    return {
-      home: Math.round(home * 100),
-      draw: Math.round(draw * 100),
-      away: Math.round(away * 100),
-    }
-  }
 
   const openSimulate = (p: Partido) => {
+    if (isPlayed(p)) return
     setSelectedMatch(p)
     setPrediction(null)
     setModalMode('simulate')
@@ -187,9 +276,16 @@ export default function Home() {
             <h1 className="h3 mb-1">El Pizarrón Estadístico</h1>
             <div className="text-muted small">Tablero de partidos, resultados y predicciones</div>
           </div>
-          <div className="btn-group" role="tablist" aria-label="Tabs">
-            <button className={`btn btn-sm ${tab === 'upcoming' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setTab('upcoming')}>Próximos Partidos</button>
-            <button className={`btn btn-sm ${tab === 'results' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setTab('results')}>Resultados</button>
+          <div className="btn-group" role="group" aria-label="Estado">
+            {(['Todos', 'Por jugar', 'Jugados'] as const).map((opt) => (
+              <button
+                key={opt}
+                className={`btn btn-sm ${statusFilter === opt ? 'btn-primary' : 'btn-outline-secondary'}`}
+                onClick={() => setStatusFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
           </div>
         </div>
         <hr className="border-top border-secondary mb-5" />
@@ -198,255 +294,242 @@ export default function Home() {
         {(loading || partidos === null) && <div className="text-center text-muted py-4">Cargando partidos...</div>}
         {error && <div className="alert alert-danger">Error: {error}</div>}
 
-        {/* Upcoming Tab */}
-        {tab === 'upcoming' && (
-          <section>
-            {/* Calendar bar */}
-            <div className="d-flex gap-2 overflow-auto pb-2 mb-3">
-              {uniqueDates.length === 0 && <div className="text-muted">No hay días con partidos próximos</div>}
-              {uniqueDates.map((iso) => {
-                const d = new Date(iso)
-                const label = d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short' })
-                return (
-                  <button
-                    key={iso}
-                    className={`btn btn-sm ${selectedDate === iso ? 'btn-primary' : 'btn-outline-secondary'}`}
-                    onClick={() => setSelectedDate(selectedDate === iso ? null : iso)}
-                  >
-                    {label}
-                  </button>
-                )
-              })}
-            </div>
+        <section>
+          <div className="d-flex gap-2 overflow-auto pb-2 mb-3">
+            {uniqueDates.length === 0 && <div className="text-muted">No hay días cargados</div>}
+            {uniqueDates.map((iso) => (
+              <button
+                key={iso}
+                className={`btn btn-sm text-nowrap ${selectedDate === iso ? 'btn-primary' : 'btn-outline-secondary'}`}
+                onClick={() => setSelectedDate(selectedDate === iso ? null : iso)}
+              >
+                {formatDateLabel(`${iso}T12:00:00Z`)}
+              </button>
+            ))}
+          </div>
 
-            {/* Cards grid */}
-            <div className="row">
-              {filteredUpcoming.map((p) => (
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span className="small text-muted">Competición:</span>
+            {competitionOptions.map((opt) => (
+              <button
+                key={opt}
+                className={`btn btn-outline-secondary btn-sm rounded-pill ${competitionFilter === opt ? 'active' : ''}`}
+                onClick={() => setCompetitionFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+
+          <div className="row">
+            {filteredMatches.map((p) => {
+              const played = isPlayed(p)
+
+              return (
                 <div key={p.id} className="col-12 col-md-6 mb-3">
                   <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
-                    <div className="d-flex justify-content-between align-items-start">
-                      <div className="small text-muted">{competitionOf(p)}</div>
-                      <div className="small text-muted">{new Date(p.date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div className="d-flex justify-content-between align-items-start gap-3">
+                      <div className="small text-muted">{tournamentOf(p)}</div>
+                      <div className="small text-muted text-end">{formatDate(p.date)}</div>
                     </div>
 
-                    <div className="d-flex align-items-center justify-content-between mt-3">
-                      <div className="d-flex align-items-center">
-                        <span className={`${flagClass(p.home_team)} me-2`} />
-                        <div>{p.home_team}</div>
-                      </div>
-
-                      <div className="text-center text-muted">vs</div>
-
-                      <div className="d-flex align-items-center">
-                        <div className="text-end me-2">{p.away_team}</div>
-                        <span className={`${flagClass(p.away_team)} ms-2`} />
-                      </div>
-                    </div>
-
-                    <div className="mt-3 d-flex justify-content-end">
-                      <button className="btn btn-success rounded-pill" onClick={() => openSimulate(p)}>Simular Predicción</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Results Tab */}
-        {tab === 'results' && (
-          <section>
-            <div className="d-flex align-items-center gap-3 mb-3">
-              <label className="mb-0 small text-muted">Competición:</label>
-              {['Todos', 'Mundial', 'Clasificatorias', 'Copa América', 'Eurocopa', 'Champions League'].map((opt) => (
-                <button
-                  key={opt}
-                  className={`btn btn-outline-secondary btn-sm rounded-pill me-2 ${competitionFilter === opt ? 'active' : ''}`}
-                  onClick={() => setCompetitionFilter(opt)}
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-
-            <div className="row">
-              {filteredResults.map((p) => (
-                <div key={p.id} className="col-12 col-md-6 mb-3">
-                  <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100" role="button" onClick={() => openDetail(p)}>
-                    <div className="d-flex align-items-center justify-content-between">
-                      <div className="d-flex align-items-center">
+                    <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
+                      <div className="d-flex align-items-center flex-fill">
                         <span className={`${flagClass(p.home_team)} me-2`} />
                         <div className="fw-semibold">{p.home_team}</div>
                       </div>
 
-                      <div className="text-warning fw-bold fs-3">{formatScore(p.home_score)} - {formatScore(p.away_score)}</div>
+                      <div className="text-center">
+                        {played ? (
+                          <div className="fs-4 fw-bold">{formatScore(p.home_score)} - {formatScore(p.away_score)}</div>
+                        ) : (
+                          <div className="text-muted">vs</div>
+                        )}
+                      </div>
 
-                      <div className="d-flex align-items-center">
+                      <div className="d-flex align-items-center justify-content-end flex-fill">
                         <div className="fw-semibold text-end me-2">{p.away_team}</div>
                         <span className={`${flagClass(p.away_team)} ms-2`} />
                       </div>
                     </div>
 
-                    <div className="mt-3 text-center small text-muted">xG: {p.home_xg != null ? p.home_xg.toFixed(2) : '-'} - {p.away_xg != null ? p.away_xg.toFixed(2) : '-'}</div>
+                    <div className="mt-3 d-flex justify-content-end">
+                      {played ? (
+                        <button className="btn btn-outline-secondary rounded-pill" onClick={() => openDetail(p)}>Ver detalle</button>
+                      ) : (
+                        <button className="btn btn-success rounded-pill" onClick={() => openSimulate(p)}>Simular</button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              )
+            })}
+          </div>
+        </section>
 
-        {/* Floating popup (single structure) */}
+        {/* Modal */}
         {selectedMatch && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              width: '100vw',
-              height: '100vh',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              zIndex: 2000,
-              background: 'rgba(0,0,0,0.25)'
-            }}
-            onClick={() => setSelectedMatch(null)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: 550,
-                width: '90%',
-                background: '#ffffff',
-                borderRadius: 12,
-                boxShadow: '0 10px 30px rgba(2,6,23,0.35)',
-                padding: 20,
-              }}
-            >
-              {/* Header with flags and title */}
-              <div className="d-flex justify-content-between align-items-start mb-3">
-                <div className="d-flex align-items-center">
-                  <span className={`${flagClass(selectedMatch.home_team)} me-2`} />
-                  <strong className="me-3">{selectedMatch.home_team}</strong>
-                  <span className="text-muted">vs</span>
-                  <strong className="ms-3">{selectedMatch.away_team}</strong>
-                  <span className={`${flagClass(selectedMatch.away_team)} ms-2`} />
-                </div>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setSelectedMatch(null)} />
-              </div>
-
-              {/* Body: xG bars or simulate probs depending on modalMode */}
-              {modalMode === 'simulate' ? (
-                <div>
-                  <p className="small text-muted">Predicción Dixon-Coles (MVP)...</p>
-                  {predLoading && <div className="text-muted small">Calculando probabilidades...</div>}
-                  {!predLoading && prediction && (
+          <>
+            <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" onClick={closeModal}>
+              <div className="modal-dialog modal-lg modal-dialog-centered" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-content bg-white text-dark border-0 shadow">
+                  <div className="modal-header bg-light border-bottom border-light">
                     <div>
-                      {/* Barra 1-X-2 compuesta */}
-                      <div className="d-flex align-items-center mb-2 small">
-                        <div className="me-2">Local</div>
-                        <div style={{ flex: 1 }}>
-                          <div className="progress" style={{ height: 18 }}>
-                            <div className="progress-bar bg-success" role="progressbar" style={{ width: `${prediction.home_win}%` }} aria-valuenow={prediction.home_win} aria-valuemin={0} aria-valuemax={100}>{prediction.home_win}%</div>
-                            <div className="progress-bar bg-secondary" role="progressbar" style={{ width: `${prediction.draw}%` }} aria-valuenow={prediction.draw} aria-valuemin={0} aria-valuemax={100}>{prediction.draw}%</div>
-                            <div className="progress-bar bg-danger" role="progressbar" style={{ width: `${prediction.away_win}%` }} aria-valuenow={prediction.away_win} aria-valuemin={0} aria-valuemax={100}>{prediction.away_win}%</div>
-                          </div>
-                        </div>
-                        <div className="ms-2">Visitante</div>
-                      </div>
+                      <h2 className="modal-title h5">
+                        <span className={`${flagClass(selectedMatch.home_team)} me-2`} />
+                        {selectedMatch.home_team}
+                        <span className="text-muted mx-2">vs</span>
+                        {selectedMatch.away_team}
+                        <span className={`${flagClass(selectedMatch.away_team)} ms-2`} />
+                      </h2>
+                      <div className="small text-muted">{tournamentOf(selectedMatch)} - {formatDate(selectedMatch.date)}</div>
+                    </div>
+                    <button type="button" className="btn-close" aria-label="Close" onClick={closeModal} />
+                  </div>
 
-                      {/* Score matrix table */}
-                      <div className="mt-3">
-                        {prediction?.score_matrix && Array.isArray(prediction.score_matrix) ? (
-                          <table className="table table-bordered table-sm text-center small">
-                            <thead>
-                              <tr>
-                                <th />
-                                {[0,1,2,3,4].map((g) => (<th key={`h-${g}`}>V {g}</th>))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {[0,1,2,3,4].map((i) => (
-                                <tr key={`r-${i}`}>
-                                  <th scope="row">L {i}</th>
-                                  {Array.isArray(prediction.score_matrix[i]) ? (
-                                    prediction.score_matrix[i].map((cell: number, j: number) => {
-                                      const isMax = prediction.most_likely.home === i && prediction.most_likely.away === j
-                                      const cls = isMax ? 'bg-warning text-dark fw-bold' : ''
-                                      return (
-                                        <td key={`c-${i}-${j}`} className={cls}>{cell}%</td>
-                                      )
-                                    })
-                                  ) : (
-                                    <td key={`c-${i}-fallback`}>0%</td>
-                                  )}
-                                </tr>
+                  <div className="modal-body bg-white">
+                    {modalMode === 'simulate' ? (
+                      <div>
+                        <div className="border-bottom border-light pb-3 mb-3">
+                          <div className="fw-semibold mb-2">Probabilidades</div>
+                          {predLoading && <div className="text-muted small">Calculando probabilidades...</div>}
+                          {!predLoading && prediction && (
+                            <div className="vstack gap-3">
+                              {([
+                                { key: 'home_win' as const, label: 'Local', value: Number(prediction.home_win ?? 0) },
+                                { key: 'draw' as const, label: 'Empate', value: Number(prediction.draw ?? 0) },
+                                { key: 'away_win' as const, label: 'Visitante', value: Number(prediction.away_win ?? 0) },
+                              ]).map((item) => {
+                                const favorite = favoriteProbability(prediction) === item.key
+                                const barClass = favorite ? 'bg-primary' : 'bg-info-subtle text-dark'
+
+                                return (
+                                  <div key={item.key}>
+                                    <div className="d-flex justify-content-between small mb-1">
+                                      <span className="fw-semibold">{item.label}</span>
+                                      <span>{item.value}%</span>
+                                    </div>
+                                    <div className="progress" role="progressbar" aria-valuenow={item.value} aria-valuemin={0} aria-valuemax={100}>
+                                      <div className={`progress-bar ${barClass}`} style={{ width: `${item.value}%` }} />
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {!predLoading && !prediction && (
+                            <div className="text-muted small">No hay predicción disponible.</div>
+                          )}
+                        </div>
+
+                        {!predLoading && prediction?.score_matrix && (
+                          <div>
+                            <div className="fw-semibold mb-2">Top 3 resultados exactos</div>
+                            <div className="d-flex flex-wrap gap-2">
+                              {topExactScores(prediction).map((score) => (
+                                <span key={`${score.home}-${score.away}`} className="badge bg-secondary text-wrap fs-6">
+                                  {score.home}-{score.away} - {score.prob}%
+                                </span>
                               ))}
-                            </tbody>
-                          </table>
-                        ) : (
-                          <p className="text-muted small">No se pudo calcular la predicción. Datos insuficientes.</p>
+                            </div>
+
+                            <hr className="text-muted" />
+
+                            <h6 className="text-muted fw-semibold mb-2">Matriz de Resultados Exactos (%)</h6>
+                            {(() => {
+                              const matrix = exactScoreMatrix(prediction)
+                              const maxValue = Math.max(...matrix.flat(), 0)
+
+                              return (
+                                <div className="table-responsive">
+                                  <table className="table table-bordered table-sm text-center align-middle mb-0">
+                                    <thead className="table-light">
+                                      <tr>
+                                        <th scope="col" className="small text-muted">Local \ Visitante</th>
+                                        {[0, 1, 2, 3, 4].map((goals) => (
+                                          <th key={`away-${goals}`} scope="col">
+                                            {goals === 4 ? '4+' : goals}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {matrix.map((row, homeGoals) => (
+                                        <tr key={`home-${homeGoals}`}>
+                                          <th scope="row" className="table-light">
+                                            {homeGoals === 4 ? '4+' : homeGoals}
+                                          </th>
+                                          {[0, 1, 2, 3, 4].map((awayGoals) => {
+                                            const value = row[awayGoals] ?? 0
+
+                                            return (
+                                              <td key={`${homeGoals}-${awayGoals}`} className={heatmapClass(value, maxValue)}>
+                                                {value}%
+                                              </td>
+                                            )
+                                          })}
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )
+                            })()}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                  {!predLoading && !prediction && (
-                    <div className="text-muted small">No hay predicción disponible.</div>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <div className="d-flex align-items-center gap-3 mb-3">
-                    <div style={{ flex: 1 }}>
-                      <div className="small text-muted">xG Local</div>
-                      <div className="progress"><div className="progress-bar bg-primary" role="progressbar" style={{ width: `${(selectedMatch.home_xg ?? 0) * 20}%` }} /></div>
-                      <div className="small text-muted mt-1">{selectedMatch.home_xg != null ? selectedMatch.home_xg.toFixed(2) : '-'}</div>
-                    </div>
+                    ) : (
+                      <div>
+                        <div className="row align-items-center border-bottom border-light pb-3 mb-3">
+                          <div className="col">
+                            <div className="small text-muted">xG Local</div>
+                            <div className="progress"><div className="progress-bar bg-primary" role="progressbar" style={{ width: `${(selectedMatch.home_xg ?? 0) * 20}%` }} /></div>
+                            <div className="small text-muted mt-1">{selectedMatch.home_xg != null ? selectedMatch.home_xg.toFixed(2) : '-'}</div>
+                          </div>
 
-                    <div style={{ width: 80 }} className="text-center">
-                      <div className="fw-bold fs-4">{formatScore(selectedMatch.home_score)} - {formatScore(selectedMatch.away_score)}</div>
-                    </div>
+                          <div className="col-auto text-center">
+                            <div className="fw-bold fs-4">{formatScore(selectedMatch.home_score)} - {formatScore(selectedMatch.away_score)}</div>
+                          </div>
 
-                    <div style={{ flex: 1 }}>
-                      <div className="small text-muted text-end">xG Visitante</div>
-                      <div className="progress"><div className="progress-bar bg-success" role="progressbar" style={{ width: `${(selectedMatch.away_xg ?? 0) * 20}%` }} /></div>
-                      <div className="small text-muted mt-1 text-end">{selectedMatch.away_xg != null ? selectedMatch.away_xg.toFixed(2) : '-'}</div>
-                    </div>
+                          <div className="col">
+                            <div className="small text-muted text-end">xG Visitante</div>
+                            <div className="progress"><div className="progress-bar bg-info" role="progressbar" style={{ width: `${(selectedMatch.away_xg ?? 0) * 20}%` }} /></div>
+                            <div className="small text-muted mt-1 text-end">{selectedMatch.away_xg != null ? selectedMatch.away_xg.toFixed(2) : '-'}</div>
+                          </div>
+                        </div>
+
+                        <table className="table table-borderless mb-0">
+                          <tbody>
+                            <tr>
+                              <td className="small text-muted">Posesión</td>
+                              <td className="text-center">54%</td>
+                              <td className="text-center">46%</td>
+                            </tr>
+                            <tr>
+                              <td className="small text-muted">Remates</td>
+                              <td className="text-center">12</td>
+                              <td className="text-center">8</td>
+                            </tr>
+                            <tr>
+                              <td className="small text-muted">Faltas</td>
+                              <td className="text-center">10</td>
+                              <td className="text-center">14</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
 
-                  <hr />
-
-                  <table className="table table-borderless mb-0">
-                    <tbody>
-                      <tr>
-                        <td className="small text-muted">Posesión</td>
-                        <td className="text-center">54%</td>
-                        <td className="text-center">46%</td>
-                      </tr>
-                      <tr>
-                        <td className="small text-muted">Remates</td>
-                        <td className="text-center">12</td>
-                        <td className="text-center">8</td>
-                      </tr>
-                      <tr>
-                        <td className="small text-muted">Faltas</td>
-                        <td className="text-center">10</td>
-                        <td className="text-center">14</td>
-                      </tr>
-                    </tbody>
-                  </table>
+                  <div className="modal-footer bg-light border-top border-light">
+                    <button className="btn btn-secondary" onClick={closeModal}>Cerrar</button>
+                  </div>
                 </div>
-              )}
-
-              {/* Footer */}
-              <div className="d-flex justify-content-end mt-3">
-                <button className="btn btn-secondary" onClick={() => setSelectedMatch(null)}>Cerrar</button>
               </div>
             </div>
-          </div>
+            <div className="modal-backdrop fade show" />
+          </>
         )}
-
-        {/* legacy bootstrap modal removed — using React-controlled floating card above */}
       </div>
     </main>
   )

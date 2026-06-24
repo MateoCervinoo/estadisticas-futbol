@@ -9,6 +9,7 @@ export interface Partido {
   home_score: number | null
   away_score: number | null
   status: string // e.g. 'NS', 'FT'
+  tournament?: string | null
   home_xg: number | null
   away_xg: number | null
 }
