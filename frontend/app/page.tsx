@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { getPartidos, Partido } from '../src/services/api'
 
 type ExactScore = {
@@ -12,6 +12,22 @@ type ExactScore = {
 type ProbabilityKey = 'home_win' | 'draw' | 'away_win'
 
 const ARGENTINA_TIME_ZONE = 'America/Argentina/Buenos_Aires'
+const DAY_LABEL_FORMAT: Intl.DateTimeFormatOptions = {
+  timeZone: ARGENTINA_TIME_ZONE,
+  weekday: 'short',
+  day: '2-digit',
+  month: 'short',
+}
+
+const CLOCK_LABEL_FORMAT: Intl.DateTimeFormatOptions = {
+  timeZone: ARGENTINA_TIME_ZONE,
+  weekday: 'short',
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+}
 
 const TOURNAMENT_LABELS: Record<string, string> = {
   GROUP_STAGE: 'Fase de Grupos',
@@ -38,6 +54,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   // start in loading state so the initial render shows a loading message
   const [loading, setLoading] = useState<boolean>(true)
+  const [now, setNow] = useState<Date>(new Date())
 
   useEffect(() => {
     let mounted = true
@@ -56,6 +73,11 @@ export default function Home() {
     return () => {
       mounted = false
     }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
   }, [])
 
   const formatScore = (s: number | null) => (s === null || s === undefined ? '-' : String(s))
@@ -81,14 +103,17 @@ export default function Home() {
   }
   const formatDateLabel = (iso: string) => {
     try {
-      return parseMatchDate(iso).toLocaleDateString('es-AR', {
-        timeZone: ARGENTINA_TIME_ZONE,
-        weekday: 'short',
-        day: '2-digit',
-        month: 'short',
-      })
+      return parseMatchDate(iso).toLocaleDateString('es-AR', DAY_LABEL_FORMAT)
     } catch {
       return iso
+    }
+  }
+
+  const formatClock = (date: Date) => {
+    try {
+      return date.toLocaleString('es-AR', CLOCK_LABEL_FORMAT)
+    } catch {
+      return date.toISOString()
     }
   }
 
@@ -164,16 +189,6 @@ export default function Home() {
       .slice(0, 3)
   }
 
-  const favoriteProbability = (predictionData: any): ProbabilityKey => {
-    const values: Record<ProbabilityKey, number> = {
-      home_win: Number(predictionData?.home_win ?? 0),
-      draw: Number(predictionData?.draw ?? 0),
-      away_win: Number(predictionData?.away_win ?? 0),
-    }
-
-    return (Object.entries(values).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'home_win') as ProbabilityKey
-  }
-
   const exactScoreMatrix = (predictionData: any): number[][] => {
     if (!Array.isArray(predictionData?.score_matrix)) return []
 
@@ -191,11 +206,9 @@ export default function Home() {
     if (maxValue <= 0 || value <= 0) return 'bg-white'
 
     const intensity = value / maxValue
-    if (intensity >= 0.85) return 'bg-primary text-white fw-bold'
-    if (intensity >= 0.6) return 'bg-info text-white fw-semibold'
-    if (intensity >= 0.35) return 'bg-info-subtle fw-semibold'
-    if (intensity >= 0.15) return 'bg-primary-subtle'
-    return 'bg-white'
+    if (intensity >= 0.66) return 'bg-success text-white fw-bold'
+    if (intensity >= 0.33) return 'bg-warning text-dark fw-semibold'
+    return 'bg-danger text-white'
   }
 
   // UI states for filters and modals
@@ -203,6 +216,7 @@ export default function Home() {
   const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
   const [stageFilter, setStageFilter] = useState<string>('Todos')
   const [groupFilter, setGroupFilter] = useState<string>('Todos')
+  const [showFilters, setShowFilters] = useState<boolean>(false)
   // single selectedMatch controls any open modal; modalMode decides which modal to show
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
@@ -210,9 +224,18 @@ export default function Home() {
   const [predLoading, setPredLoading] = useState<boolean>(false)
 
   const allMatches = partidos ?? []
-  const competitionOptions = ['Todos', ...Array.from(new Set(allMatches.map(tournamentOf).filter(Boolean)))]
-  const stageOptions = ['Todos', ...Array.from(new Set(allMatches.map(stageOf).filter(Boolean)))]
-  const groupOptions = ['Todos', ...Array.from(new Set(allMatches.map(groupOf).filter((g) => g && g !== 'Sin grupo')))]
+  const competitionOptions = useMemo(
+    () => ['Todos', ...Array.from(new Set(allMatches.map(tournamentOf).filter(Boolean)))],
+    [allMatches]
+  )
+  const stageOptions = useMemo(
+    () => ['Todos', ...Array.from(new Set(allMatches.map(stageOf).filter(Boolean)))],
+    [allMatches]
+  )
+  const groupOptions = useMemo(
+    () => ['Todos', ...Array.from(new Set(allMatches.map(groupOf).filter((g) => g && g !== 'Sin grupo')))],
+    [allMatches]
+  )
 
   // build a list of unique dates for the calendar bar based on every match, including past days
   const uniqueDates = Array.from(
@@ -234,6 +257,18 @@ export default function Home() {
   const flagClass = (team: string, explicitCode?: string | null) => {
     const code = (explicitCode || teamToFlag[team] || team.slice(0, 2)).toLowerCase()
     return `fi fi-${code}`
+  }
+
+  const probabilityBarClass = (key: ProbabilityKey) => {
+    if (key === 'home_win') return 'bg-success'
+    if (key === 'draw') return 'bg-warning text-dark'
+    return 'bg-danger'
+  }
+
+  const topScoreBadgeClass = (index: number) => {
+    if (index === 0) return 'bg-success'
+    if (index === 1) return 'bg-warning text-dark'
+    return 'bg-danger'
   }
 
   const filteredMatches = allMatches.filter((p) => {
@@ -299,10 +334,13 @@ export default function Home() {
   return (
     <main className="min-vh-100 bg-light p-5 text-dark">
       <div className="container mt-4">
-        <div className="d-flex align-items-center justify-content-between mb-3">
-          <div>
-            <h1 className="h3 mb-1">El Pizarrón Estadístico</h1>
-            <div className="text-muted small">Tablero de partidos, resultados y predicciones</div>
+        <div className="d-flex align-items-center justify-content-between gap-3 mb-3">
+          <div className="d-flex align-items-center gap-3">
+            <img src="/pizarron-estadistico.png" alt="Logo Pizarrón Estadístico" className="app-logo" />
+          </div>
+          <div className="clock-pill text-end">
+            <div className="small text-muted">Hoy</div>
+            <div className="fw-semibold">{formatClock(now)}</div>
           </div>
         </div>
         <hr className="border-top border-secondary mb-5" />
@@ -312,56 +350,92 @@ export default function Home() {
         {error && <div className="alert alert-danger">Error: {error}</div>}
 
         <section>
-          <div className="d-flex gap-2 overflow-auto pb-2 mb-3">
-            {uniqueDates.length === 0 && <div className="text-muted">No hay días cargados</div>}
-            {uniqueDates.map((iso) => (
-              <button
-                key={iso}
-                className={`btn btn-sm text-nowrap ${selectedDate === iso ? 'btn-primary' : 'btn-outline-secondary'}`}
-                onClick={() => setSelectedDate(selectedDate === iso ? null : iso)}
-              >
-                {formatDateLabel(`${iso}T12:00:00Z`)}
-              </button>
-            ))}
-          </div>
+          <div className="border rounded-4 bg-white shadow-sm p-3 mb-4">
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+              <div>
+                <div className="fw-semibold">Calendario</div>
+                <div className="small text-muted">Elegí el día para concentrarte en una jornada</div>
+              </div>
+            </div>
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Competición:</span>
-            {competitionOptions.map((opt) => (
-              <button
-                key={opt}
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${competitionFilter === opt ? 'active' : ''}`}
-                onClick={() => setCompetitionFilter(opt)}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
+            <div className="day-selector d-flex gap-2 overflow-auto pb-2">
+              {uniqueDates.length === 0 && <div className="text-muted">No hay días cargados</div>}
+              {uniqueDates.map((iso) => {
+                const active = selectedDate === iso
+                const label = formatDateLabel(`${iso}T12:00:00Z`)
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Etapa:</span>
-            {stageOptions.map((opt) => (
-              <button
-                key={`stage-${opt}`}
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${stageFilter === opt ? 'active' : ''}`}
-                onClick={() => setStageFilter(opt)}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
+                return (
+                  <button
+                    key={iso}
+                    className={`btn day-selector-btn text-start ${active ? 'btn-primary' : 'btn-outline-secondary'}`}
+                    onClick={() => setSelectedDate(active ? null : iso)}
+                  >
+                    <div className="small text-uppercase opacity-75">Día</div>
+                    <div className="fw-semibold text-nowrap">{label}</div>
+                  </button>
+                )
+              })}
+            </div>
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Grupo:</span>
-            {groupOptions.map((opt) => (
-              <button
-                key={`group-${opt}`}
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${groupFilter === opt ? 'active' : ''}`}
-                onClick={() => setGroupFilter(opt)}
-              >
-                {opt}
-              </button>
-            ))}
+            <div className="border-top mt-3 pt-3">
+              <div className="d-flex align-items-center justify-content-between gap-2">
+                <div>
+                  <div className="fw-semibold">Filtros</div>
+                  <div className="small text-muted">Filtrá por competencia, etapa o grupo</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2"
+                  onClick={() => setShowFilters((value) => !value)}
+                >
+                  <span>{showFilters ? 'Ocultar' : 'Mostrar'}</span>
+                  <span aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
+                </button>
+              </div>
+
+              {showFilters && (
+                <div className="pt-3">
+                  <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <span className="small text-muted">Competición:</span>
+                    {competitionOptions.map((opt) => (
+                      <button
+                        key={opt}
+                        className={`btn btn-outline-secondary btn-sm rounded-pill ${competitionFilter === opt ? 'active' : ''}`}
+                        onClick={() => setCompetitionFilter(opt)}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <span className="small text-muted">Etapa:</span>
+                    {stageOptions.map((opt) => (
+                      <button
+                        key={`stage-${opt}`}
+                        className={`btn btn-outline-secondary btn-sm rounded-pill ${stageFilter === opt ? 'active' : ''}`}
+                        onClick={() => setStageFilter(opt)}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="d-flex flex-wrap align-items-center gap-2">
+                    <span className="small text-muted">Grupo:</span>
+                    {groupOptions.map((opt) => (
+                      <button
+                        key={`group-${opt}`}
+                        className={`btn btn-outline-secondary btn-sm rounded-pill ${groupFilter === opt ? 'active' : ''}`}
+                        onClick={() => setGroupFilter(opt)}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="row">
@@ -424,27 +498,15 @@ export default function Home() {
             <div className="modal fade show d-block" tabIndex={-1} role="dialog" aria-modal="true" onClick={closeModal}>
               <div className="modal-dialog modal-lg modal-dialog-centered" onClick={(e) => e.stopPropagation()}>
                 <div className="modal-content bg-white text-dark border-0 shadow">
-                  <div className="modal-header bg-light border-bottom border-light">
-                    <div>
-                      <h2 className="modal-title h5">
-                        {selectedMatch.home_crest_url ? (
-                          <img src={selectedMatch.home_crest_url} alt={`Escudo ${selectedMatch.home_team}`} width={22} height={22} className="me-2" />
-                        ) : (
-                          <span className={`${flagClass(selectedMatch.home_team, selectedMatch.home_codigo_bandera)} me-2`} />
-                        )}
-                        {selectedMatch.home_team}
-                        <span className="text-muted mx-2">vs</span>
-                        {selectedMatch.away_team}
-                        {selectedMatch.away_crest_url ? (
-                          <img src={selectedMatch.away_crest_url} alt={`Escudo ${selectedMatch.away_team}`} width={22} height={22} className="ms-2" />
-                        ) : (
-                          <span className={`${flagClass(selectedMatch.away_team, selectedMatch.away_codigo_bandera)} ms-2`} />
-                        )}
-                      </h2>
-                      <div className="small text-muted">
-                        {tournamentOf(selectedMatch)} · {stageOf(selectedMatch)}{selectedMatch.group ? ` · ${groupOf(selectedMatch)}` : ''} - {formatDate(selectedMatch.date)}
-                      </div>
+                <div className="modal-header bg-light border-bottom border-light">
+                  <div>
+                    <h2 className="modal-title h5">
+                      {tournamentOf(selectedMatch)}
+                    </h2>
+                    <div className="small text-muted">
+                      {stageOf(selectedMatch)}{selectedMatch.group ? ` · ${groupOf(selectedMatch)}` : ''} - {formatDate(selectedMatch.date)}
                     </div>
+                  </div>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeModal} />
                   </div>
 
@@ -461,9 +523,7 @@ export default function Home() {
                                 { key: 'draw' as const, label: 'Empate', value: Number(prediction.draw ?? 0) },
                                 { key: 'away_win' as const, label: 'Visitante', value: Number(prediction.away_win ?? 0) },
                               ]).map((item) => {
-                                const favorite = favoriteProbability(prediction) === item.key
-                                const barClass = favorite ? 'bg-primary' : 'bg-info-subtle text-dark'
-
+                                const barClass = probabilityBarClass(item.key)
                                 return (
                                   <div key={item.key}>
                                     <div className="d-flex justify-content-between small mb-1">
@@ -485,10 +545,10 @@ export default function Home() {
 
                         {!predLoading && prediction?.score_matrix && (
                           <div>
-                            <div className="fw-semibold mb-2">Top 3 resultados exactos</div>
+                            <div className="fw-semibold mb-2">Top 3 resultados posibles</div>
                             <div className="d-flex flex-wrap gap-2">
-                              {topExactScores(prediction).map((score) => (
-                                <span key={`${score.home}-${score.away}`} className="badge bg-secondary text-wrap fs-6">
+                              {topExactScores(prediction).map((score, index) => (
+                                <span key={`${score.home}-${score.away}`} className={`badge ${topScoreBadgeClass(index)} text-wrap fs-6`}>
                                   {score.home}-{score.away} - {score.prob}%
                                 </span>
                               ))}
@@ -496,17 +556,21 @@ export default function Home() {
 
                             <hr className="text-muted" />
 
-                            <h6 className="text-muted fw-semibold mb-2">Matriz de Resultados Exactos (%)</h6>
+                            <h6 className="text-muted fw-semibold mb-2">Matriz de Resultados Posibles (%)</h6>
                             {(() => {
                               const matrix = exactScoreMatrix(prediction)
                               const maxValue = Math.max(...matrix.flat(), 0)
 
                               return (
                                 <div className="table-responsive">
+                                  <div className="d-flex justify-content-between small text-muted mb-2 px-1">
+                                    <span>Filas: Local</span>
+                                    <span>Columnas: Visitante</span>
+                                  </div>
                                   <table className="table table-bordered table-sm text-center align-middle mb-0">
                                     <thead className="table-light">
                                       <tr>
-                                        <th scope="col" className="small text-muted">Local \ Visitante</th>
+                                        <th scope="col" className="small text-muted">Marcador</th>
                                         {[0, 1, 2, 3, 4].map((goals) => (
                                           <th key={`away-${goals}`} scope="col">
                                             {goals === 4 ? '4+' : goals}
@@ -541,30 +605,36 @@ export default function Home() {
                       </div>
                     ) : (
                       <div>
-                        <div className="row align-items-center border-bottom border-light pb-3 mb-3">
-                          <div className="col">
-                            <div className="small text-muted">xG Local</div>
-                            <div className="progress"><div className="progress-bar bg-primary" role="progressbar" style={{ width: `${(selectedMatch.home_xg ?? 0) * 20}%` }} /></div>
-                            <div className="small text-muted mt-1">{selectedMatch.home_xg != null ? selectedMatch.home_xg.toFixed(2) : '-'}</div>
+                          <div className="border-bottom border-light pb-3 mb-3">
+                            <div className="d-flex align-items-center justify-content-between gap-3">
+                              <div className="d-flex align-items-center gap-2">
+                                <span className={`${flagClass(selectedMatch.home_team, selectedMatch.home_codigo_bandera)}`} />
+                                <div>
+                                  <div className="fw-semibold">{selectedMatch.home_team}</div>
+                                  <div className="small text-muted">Local</div>
+                                </div>
+                              </div>
+
+                              <div className="text-center">
+                                <div className="fw-bold fs-4">{formatScore(selectedMatch.home_score)} - {formatScore(selectedMatch.away_score)}</div>
+                                {(selectedMatch.ht_home_score != null || selectedMatch.ht_away_score != null) && (
+                                  <div className="small text-muted">HT: {formatScore(selectedMatch.ht_home_score)} - {formatScore(selectedMatch.ht_away_score)}</div>
+                                )}
+                              </div>
+
+                              <div className="d-flex align-items-center gap-2 text-end">
+                                <div>
+                                  <div className="fw-semibold">{selectedMatch.away_team}</div>
+                                  <div className="small text-muted">Visitante</div>
+                                </div>
+                                <span className={`${flagClass(selectedMatch.away_team, selectedMatch.away_codigo_bandera)}`} />
+                              </div>
+                            </div>
                           </div>
 
-                          <div className="col-auto text-center">
-                            <div className="fw-bold fs-4">{formatScore(selectedMatch.home_score)} - {formatScore(selectedMatch.away_score)}</div>
-                            {(selectedMatch.ht_home_score != null || selectedMatch.ht_away_score != null) && (
-                              <div className="small text-muted">HT: {formatScore(selectedMatch.ht_home_score)} - {formatScore(selectedMatch.ht_away_score)}</div>
-                            )}
+                          <div className="small text-muted">
+                            Estadísticas avanzadas (posesión, remates y faltas) no disponibles en este momento.
                           </div>
-
-                          <div className="col">
-                            <div className="small text-muted text-end">xG Visitante</div>
-                            <div className="progress"><div className="progress-bar bg-info" role="progressbar" style={{ width: `${(selectedMatch.away_xg ?? 0) * 20}%` }} /></div>
-                            <div className="small text-muted mt-1 text-end">{selectedMatch.away_xg != null ? selectedMatch.away_xg.toFixed(2) : '-'}</div>
-                          </div>
-                        </div>
-
-                        <div className="small text-muted">
-                          Estadísticas avanzadas (posesión, remates y faltas) no disponibles en este momento.
-                        </div>
                       </div>
                     )}
                   </div>

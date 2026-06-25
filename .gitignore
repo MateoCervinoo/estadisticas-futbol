@@ -2,5 +2,11 @@ venv/
 __pycache__/
 node_modules/
 frontend/.next/
+frontend/.next*/
+frontend/tmp/
+frontend/tsconfig.tsbuildinfo
 *.pyc
 .DS_Store
+archivos-privados
+archivos-privados/
+source/
