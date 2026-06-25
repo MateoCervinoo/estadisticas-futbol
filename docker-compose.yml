@@ -35,6 +35,26 @@ services:
     ports:
       - "8000:8000"
 
+  sync_worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/estadisticas
+      - PYTHONUNBUFFERED=1
+      - API_FOOTBALL_KEY=48845f6680654134b9cb9b1f00bec169
+      - CSV_DATA_PATH=/app/data/results.csv
+    volumes:
+      - ./backend:/app:cached
+      - ./data:/app/data:cached
+    command: >
+      sh -c "while true; do
+      python -c 'from app.sync import sync_fixtures_and_metrics; print(sync_fixtures_and_metrics())';
+      sleep 300;
+      done"
+
   frontend:
     build:
       context: ./frontend

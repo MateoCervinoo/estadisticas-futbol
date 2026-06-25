@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
 
-from .database import engine
+from .database import engine, ensure_partido_columns
 from .models import Partido, Equipo
 from .dixoncoles import predict_match, predict_exact_score_matrix
 from .sync import sync_fixtures_and_metrics
@@ -29,6 +29,7 @@ def on_startup():
     # Crear tablas en la base de datos (requerimiento explícito)
     try:
         SQLModel.metadata.create_all(engine)
+        ensure_partido_columns()
         logger.info("Tablas creadas/confirmadas en la base de datos")
     except Exception:
         logger.exception("Fallo creando tablas en la base de datos al startup. Continuando...")
