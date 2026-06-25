@@ -41,9 +41,15 @@ class Partido(SQLModel, table=True):
     away_team_id: Optional[int] = Field(default=None, foreign_key="equipo.id")
     home_score: Optional[int] = None
     away_score: Optional[int] = None
+    ht_home_score: Optional[int] = None
+    ht_away_score: Optional[int] = None
     status: str = Field(default="NS")
     # Nombre estandarizado de la competición (ej. 'Mundial', 'Copa América', 'Clasificatorias')
     tournament: Optional[str] = None
+    stage: Optional[str] = None
+    group: Optional[str] = None
+    home_crest_url: Optional[str] = None
+    away_crest_url: Optional[str] = None
     home_xg: Optional[float] = None
     away_xg: Optional[float] = None
 

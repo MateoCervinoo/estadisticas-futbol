@@ -5,6 +5,7 @@ Overview
 This repository is a monorepo for a World Cup 2026 statistics project. It contains:
 
 - backend: FastAPI + SQLModel (Python)
+- sync_worker: proceso independiente que sincroniza fixtures del Mundial cada 5 minutos
 - frontend: Next.js (App Router) + Tailwind CSS
 - db: PostgreSQL (persistent volume)
 

@@ -18,7 +18,7 @@ from sqlmodel import Session, select
 
 from .api_client import APIFootballClient
 from .models import Partido
-from .database import engine, init_db
+from .database import engine, init_db, ensure_partido_columns
 from .data_mapper import normalize_status, normalize_tournament
 
 logger = logging.getLogger(__name__)
@@ -105,6 +105,7 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
 
     Retorna un resumen con conteos y listas de fixtures procesados.
     """
+    ensure_partido_columns()
     client = APIFootballClient()  # si no hay API key, entra en modo mock
 
     fixtures = client.get_world_cup_fixtures()
@@ -128,8 +129,15 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             away_team = f.get('away_team')
             goals_home = f.get('goals_home')
             goals_away = f.get('goals_away')
-            status = f.get('status') or 'NS'
-            tournament = 'Mundial'
+            ht_goals_home = f.get('ht_goals_home')
+            ht_goals_away = f.get('ht_goals_away')
+            stage = f.get('stage')
+            group = f.get('group')
+            home_crest_url = f.get('home_crest_url')
+            away_crest_url = f.get('away_crest_url')
+            raw_status = f.get('status')
+            status = normalize_status(raw_status, source="api")
+            tournament = normalize_tournament('Mundial')
 
             # Mapear nombres de la API a IDs de Equipo si existe la tabla
             home_team_id = None
@@ -161,8 +169,14 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                         away_team_id=away_team_id,
                         home_score=goals_home,
                         away_score=goals_away,
+                        ht_home_score=ht_goals_home,
+                        ht_away_score=ht_goals_away,
                         status=status,
                         tournament=tournament,
+                        stage=stage,
+                        group=group,
+                        home_crest_url=home_crest_url,
+                        away_crest_url=away_crest_url,
                     )
 
                     # Si ya está finalizado, calcular xG
@@ -184,6 +198,18 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                     local_final = existing.status in FINAL_STATUSES
                     api_final = status in FINAL_STATUSES or status == 'IN_PLAY'
                     transitioned_to_final = not local_final and status in FINAL_STATUSES
+                    metadata_changed = (
+                        existing.stage != stage
+                        or existing.group != group
+                        or existing.home_crest_url != home_crest_url
+                        or existing.away_crest_url != away_crest_url
+                        or existing.ht_home_score != ht_goals_home
+                        or existing.ht_away_score != ht_goals_away
+                    )
+                    score_changed = (
+                        existing.home_score != goals_home
+                        or existing.away_score != goals_away
+                    )
 
                     # If the local record is final, only update if 2 hours have passed since match date
                     # (approximation for "2 hours since its finalization") or if the API reports a different status
@@ -197,18 +223,30 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                         # If date parsing fails, be conservative and do not allow automatic final updates
                         allow_update_after_final_hours = False
 
-                    if local_final and not allow_update_after_final_hours and status in FINAL_STATUSES:
+                    if local_final and not allow_update_after_final_hours and status in FINAL_STATUSES and not (metadata_changed or score_changed):
                         # local final and API also final but within 2 hours -> skip
                         logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
                         continue
 
                     # Update when local is scheduled/timed and API reports in-play or finished,
                     # or if the status has changed (including after 2 hours for final matches)
-                    if (existing.status in ('NS', 'TIMED') and api_final) or (existing.status != status) or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES):
+                    if (
+                        (existing.status in ('NS', 'TIMED') and api_final)
+                        or (existing.status != status)
+                        or score_changed
+                        or metadata_changed
+                        or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES)
+                    ):
                         existing.home_score = goals_home
                         existing.away_score = goals_away
+                        existing.ht_home_score = ht_goals_home
+                        existing.ht_away_score = ht_goals_away
                         existing.status = status
                         existing.tournament = tournament
+                        existing.stage = stage
+                        existing.group = group
+                        existing.home_crest_url = home_crest_url
+                        existing.away_crest_url = away_crest_url
 
                         # Actualizar referencia a Equipo si fue mapeada
                         if home_team_id is not None:

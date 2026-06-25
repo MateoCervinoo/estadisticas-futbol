@@ -24,6 +24,15 @@ const TOURNAMENT_LABELS: Record<string, string> = {
   WORLD_CUP: 'Mundial',
 }
 
+const STAGE_LABELS: Record<string, string> = {
+  GROUP_STAGE: 'Fase de Grupos',
+  ROUND_OF_16: 'Octavos de Final',
+  QUARTER_FINALS: 'Cuartos de Final',
+  SEMI_FINALS: 'Semifinales',
+  THIRD_PLACE: 'Tercer Puesto',
+  FINAL: 'Final',
+}
+
 export default function Home() {
   const [partidos, setPartidos] = useState<Partido[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -50,9 +59,15 @@ export default function Home() {
   }, [])
 
   const formatScore = (s: number | null) => (s === null || s === undefined ? '-' : String(s))
+  const parseMatchDate = (iso: string) => {
+    const value = String(iso ?? '').trim()
+    if (!value) return new Date(Number.NaN)
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)
+    return new Date(hasTimezone ? value : `${value}Z`)
+  }
   const formatDate = (iso: string) => {
     try {
-      return new Date(iso).toLocaleString('es-AR', {
+      return parseMatchDate(iso).toLocaleString('es-AR', {
         timeZone: ARGENTINA_TIME_ZONE,
         weekday: 'short',
         day: '2-digit',
@@ -66,7 +81,7 @@ export default function Home() {
   }
   const formatDateLabel = (iso: string) => {
     try {
-      return new Date(iso).toLocaleDateString('es-AR', {
+      return parseMatchDate(iso).toLocaleDateString('es-AR', {
         timeZone: ARGENTINA_TIME_ZONE,
         weekday: 'short',
         day: '2-digit',
@@ -84,7 +99,7 @@ export default function Home() {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
-      }).formatToParts(new Date(iso))
+      }).formatToParts(parseMatchDate(iso))
 
       const year = parts.find((part) => part.type === 'year')?.value
       const month = parts.find((part) => part.type === 'month')?.value
@@ -105,6 +120,18 @@ export default function Home() {
     const rawTournament = p.tournament?.trim()
     if (!rawTournament) return 'Mundial'
     return TOURNAMENT_LABELS[rawTournament] ?? rawTournament
+  }
+
+  const stageOf = (p: Partido) => {
+    const rawStage = p.stage?.trim()
+    if (!rawStage) return 'Sin etapa'
+    return STAGE_LABELS[rawStage] ?? rawStage
+  }
+
+  const groupOf = (p: Partido) => {
+    const rawGroup = p.group?.trim()
+    if (!rawGroup) return 'Sin grupo'
+    return rawGroup.replace('GROUP_', 'Grupo ')
   }
 
   const topExactScores = (predictionData: any): ExactScore[] => {
@@ -174,7 +201,8 @@ export default function Home() {
   // UI states for filters and modals
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
-  const [statusFilter, setStatusFilter] = useState<'Todos' | 'Por jugar' | 'Jugados'>('Todos')
+  const [stageFilter, setStageFilter] = useState<string>('Todos')
+  const [groupFilter, setGroupFilter] = useState<string>('Todos')
   // single selectedMatch controls any open modal; modalMode decides which modal to show
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
@@ -183,6 +211,8 @@ export default function Home() {
 
   const allMatches = partidos ?? []
   const competitionOptions = ['Todos', ...Array.from(new Set(allMatches.map(tournamentOf).filter(Boolean)))]
+  const stageOptions = ['Todos', ...Array.from(new Set(allMatches.map(stageOf).filter(Boolean)))]
+  const groupOptions = ['Todos', ...Array.from(new Set(allMatches.map(groupOf).filter((g) => g && g !== 'Sin grupo')))]
 
   // build a list of unique dates for the calendar bar based on every match, including past days
   const uniqueDates = Array.from(
@@ -201,20 +231,18 @@ export default function Home() {
     'South Korea': 'kr',
   }
 
-  const flagClass = (team: string) => {
-    const code = teamToFlag[team] || team.slice(0, 2).toLowerCase()
+  const flagClass = (team: string, explicitCode?: string | null) => {
+    const code = (explicitCode || teamToFlag[team] || team.slice(0, 2)).toLowerCase()
     return `fi fi-${code}`
   }
 
   const filteredMatches = allMatches.filter((p) => {
     const matchesDate = !selectedDate || dateKey(p.date) === selectedDate
     const matchesCompetition = !competitionFilter || competitionFilter === 'Todos' || tournamentOf(p) === competitionFilter
-    const matchesStatus =
-      statusFilter === 'Todos' ||
-      (statusFilter === 'Jugados' && isPlayed(p)) ||
-      (statusFilter === 'Por jugar' && !isPlayed(p))
+    const matchesStage = !stageFilter || stageFilter === 'Todos' || stageOf(p) === stageFilter
+    const matchesGroup = !groupFilter || groupFilter === 'Todos' || groupOf(p) === groupFilter
 
-    return matchesDate && matchesCompetition && matchesStatus
+    return matchesDate && matchesCompetition && matchesStage && matchesGroup
   })
 
   const openSimulate = (p: Partido) => {
@@ -276,17 +304,6 @@ export default function Home() {
             <h1 className="h3 mb-1">El Pizarrón Estadístico</h1>
             <div className="text-muted small">Tablero de partidos, resultados y predicciones</div>
           </div>
-          <div className="btn-group" role="group" aria-label="Estado">
-            {(['Todos', 'Por jugar', 'Jugados'] as const).map((opt) => (
-              <button
-                key={opt}
-                className={`btn btn-sm ${statusFilter === opt ? 'btn-primary' : 'btn-outline-secondary'}`}
-                onClick={() => setStatusFilter(opt)}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
         </div>
         <hr className="border-top border-secondary mb-5" />
 
@@ -321,6 +338,32 @@ export default function Home() {
             ))}
           </div>
 
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span className="small text-muted">Etapa:</span>
+            {stageOptions.map((opt) => (
+              <button
+                key={`stage-${opt}`}
+                className={`btn btn-outline-secondary btn-sm rounded-pill ${stageFilter === opt ? 'active' : ''}`}
+                onClick={() => setStageFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span className="small text-muted">Grupo:</span>
+            {groupOptions.map((opt) => (
+              <button
+                key={`group-${opt}`}
+                className={`btn btn-outline-secondary btn-sm rounded-pill ${groupFilter === opt ? 'active' : ''}`}
+                onClick={() => setGroupFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+
           <div className="row">
             {filteredMatches.map((p) => {
               const played = isPlayed(p)
@@ -329,13 +372,17 @@ export default function Home() {
                 <div key={p.id} className="col-12 col-md-6 mb-3">
                   <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
                     <div className="d-flex justify-content-between align-items-start gap-3">
-                      <div className="small text-muted">{tournamentOf(p)}</div>
+                      <div className="small text-muted">{tournamentOf(p)} · {stageOf(p)}{p.group ? ` · ${groupOf(p)}` : ''}</div>
                       <div className="small text-muted text-end">{formatDate(p.date)}</div>
                     </div>
 
                     <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
                       <div className="d-flex align-items-center flex-fill">
-                        <span className={`${flagClass(p.home_team)} me-2`} />
+                        {p.home_crest_url ? (
+                          <img src={p.home_crest_url} alt={`Escudo ${p.home_team}`} width={22} height={22} className="me-2" />
+                        ) : (
+                          <span className={`${flagClass(p.home_team, p.home_codigo_bandera)} me-2`} />
+                        )}
                         <div className="fw-semibold">{p.home_team}</div>
                       </div>
 
@@ -349,7 +396,11 @@ export default function Home() {
 
                       <div className="d-flex align-items-center justify-content-end flex-fill">
                         <div className="fw-semibold text-end me-2">{p.away_team}</div>
-                        <span className={`${flagClass(p.away_team)} ms-2`} />
+                        {p.away_crest_url ? (
+                          <img src={p.away_crest_url} alt={`Escudo ${p.away_team}`} width={22} height={22} className="ms-2" />
+                        ) : (
+                          <span className={`${flagClass(p.away_team, p.away_codigo_bandera)} ms-2`} />
+                        )}
                       </div>
                     </div>
 
@@ -376,13 +427,23 @@ export default function Home() {
                   <div className="modal-header bg-light border-bottom border-light">
                     <div>
                       <h2 className="modal-title h5">
-                        <span className={`${flagClass(selectedMatch.home_team)} me-2`} />
+                        {selectedMatch.home_crest_url ? (
+                          <img src={selectedMatch.home_crest_url} alt={`Escudo ${selectedMatch.home_team}`} width={22} height={22} className="me-2" />
+                        ) : (
+                          <span className={`${flagClass(selectedMatch.home_team, selectedMatch.home_codigo_bandera)} me-2`} />
+                        )}
                         {selectedMatch.home_team}
                         <span className="text-muted mx-2">vs</span>
                         {selectedMatch.away_team}
-                        <span className={`${flagClass(selectedMatch.away_team)} ms-2`} />
+                        {selectedMatch.away_crest_url ? (
+                          <img src={selectedMatch.away_crest_url} alt={`Escudo ${selectedMatch.away_team}`} width={22} height={22} className="ms-2" />
+                        ) : (
+                          <span className={`${flagClass(selectedMatch.away_team, selectedMatch.away_codigo_bandera)} ms-2`} />
+                        )}
                       </h2>
-                      <div className="small text-muted">{tournamentOf(selectedMatch)} - {formatDate(selectedMatch.date)}</div>
+                      <div className="small text-muted">
+                        {tournamentOf(selectedMatch)} · {stageOf(selectedMatch)}{selectedMatch.group ? ` · ${groupOf(selectedMatch)}` : ''} - {formatDate(selectedMatch.date)}
+                      </div>
                     </div>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeModal} />
                   </div>
@@ -489,6 +550,9 @@ export default function Home() {
 
                           <div className="col-auto text-center">
                             <div className="fw-bold fs-4">{formatScore(selectedMatch.home_score)} - {formatScore(selectedMatch.away_score)}</div>
+                            {(selectedMatch.ht_home_score != null || selectedMatch.ht_away_score != null) && (
+                              <div className="small text-muted">HT: {formatScore(selectedMatch.ht_home_score)} - {formatScore(selectedMatch.ht_away_score)}</div>
+                            )}
                           </div>
 
                           <div className="col">
@@ -498,25 +562,9 @@ export default function Home() {
                           </div>
                         </div>
 
-                        <table className="table table-borderless mb-0">
-                          <tbody>
-                            <tr>
-                              <td className="small text-muted">Posesión</td>
-                              <td className="text-center">54%</td>
-                              <td className="text-center">46%</td>
-                            </tr>
-                            <tr>
-                              <td className="small text-muted">Remates</td>
-                              <td className="text-center">12</td>
-                              <td className="text-center">8</td>
-                            </tr>
-                            <tr>
-                              <td className="small text-muted">Faltas</td>
-                              <td className="text-center">10</td>
-                              <td className="text-center">14</td>
-                            </tr>
-                          </tbody>
-                        </table>
+                        <div className="small text-muted">
+                          Estadísticas avanzadas (posesión, remates y faltas) no disponibles en este momento.
+                        </div>
                       </div>
                     )}
                   </div>

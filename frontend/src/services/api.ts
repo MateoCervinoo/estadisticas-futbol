@@ -8,8 +8,16 @@ export interface Partido {
   away_team: string
   home_score: number | null
   away_score: number | null
+  ht_home_score: number | null
+  ht_away_score: number | null
   status: string // e.g. 'NS', 'FT'
   tournament?: string | null
+  stage?: string | null
+  group?: string | null
+  home_crest_url?: string | null
+  away_crest_url?: string | null
+  home_codigo_bandera?: string | null
+  away_codigo_bandera?: string | null
   home_xg: number | null
   away_xg: number | null
 }

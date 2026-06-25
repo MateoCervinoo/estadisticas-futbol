@@ -138,51 +138,20 @@ class APIFootballClient:
         url = f"{self.base_url}/competitions/WC/matches"
         # No enviamos parámetros de fecha para evitar errores 400 y simplificar el flujo
         data = self._safe_get(url, params={})
-        # Guardar la lista completa y devolver solo los próximos partidos (SCHEDULED/TIMED)
-        matches = []
-        if data and isinstance(data, dict):
-            all_matches = data.get('matches', [])
-            self._last_matches = all_matches
-            for match in all_matches:
-                status_api = match.get('status')
-                if status_api in ('SCHEDULED', 'TIMED'):
-                    # Mapear campos básicos que usa el resto del sistema
-                    matches.append({
-                        'fixture_id': match.get('id'),
-                        'date': match.get('utcDate'),
-                        'home_team': match.get('homeTeam', {}).get('name'),
-                        'away_team': match.get('awayTeam', {}).get('name'),
-                        'goals_home': None,
-                        'goals_away': None,
-                        'status': status_api,
-                        # dejar tournament en sync.py (se establecerá a 'Mundial')
-                    })
-        else:
-            self._last_matches = []
 
-        return matches
         fixtures = []
         if not data or 'matches' not in data:
             logger.warning("Empty/invalid response from football-data matches endpoint")
             return fixtures
 
-        for match in data.get('matches', []):
+        all_matches = data.get('matches', [])
+        self._last_matches = all_matches
+
+        for match in all_matches:
             # football-data match structure
             fixture_id = match.get('id')
             date = match.get('utcDate')
             status_api = match.get('status')  # e.g. 'FINISHED', 'SCHEDULED', 'IN_PLAY', 'TIMED'
-
-            # Map API statuses to local shorthand
-            status_map = {
-                'FINISHED': 'FT',
-                'IN_PLAY': 'IN_PLAY',
-                'PAUSED': 'IN_PLAY',
-                'SCHEDULED': 'NS',
-                'TIMED': 'TIMED',
-                'POSTPONED': 'POSTPONED',
-                'CANCELLED': 'CANCELLED',
-            }
-            status = status_map.get(status_api, status_api)
 
             home_team = None
             away_team = None
@@ -197,6 +166,8 @@ class APIFootballClient:
             goals_home = full_time.get('home')
             goals_away = full_time.get('away')
 
+            half_time = match.get('score', {}).get('halfTime', {}) or {}
+
             fixtures.append({
                 'fixture_id': fixture_id,
                 'date': date,
@@ -204,7 +175,14 @@ class APIFootballClient:
                 'away_team': away_team,
                 'goals_home': goals_home,
                 'goals_away': goals_away,
-                'status': status,
+                'ht_goals_home': half_time.get('home'),
+                'ht_goals_away': half_time.get('away'),
+                'stage': match.get('stage'),
+                'group': match.get('group'),
+                'home_crest_url': match.get('homeTeam', {}).get('crest'),
+                'away_crest_url': match.get('awayTeam', {}).get('crest'),
+                # El mapeo a estados internos se hace en sync.py
+                'status': status_api,
             })
 
         return fixtures
@@ -238,6 +216,12 @@ class APIFootballClient:
 
         # If no cached detailed stats available, do NOT make an individual HTTP request per fixture
         # to avoid hitting rate limits. Return empty metrics instead.
+        empty_metrics = {
+            'shots_on_goal': {'home': None, 'away': None},
+            'shots_inside_box': {'home': None, 'away': None},
+            'shots_outside_box': {'home': None, 'away': None},
+        }
+
         if self.mock:
             # Datos simulados: mapeados por fixture_id para reproducibilidad
             mock_stats = {
@@ -258,27 +242,5 @@ class APIFootballClient:
                 'shots_outside_box': {'home': None, 'away': None},
             })
 
-        # Try to fetch match details from football-data.org
-        url = f"{self.base_url}/matches/{fixture_id}"
-        data = self._safe_get(url)
-
-        # Default empty metrics
-        empty_metrics = {
-            'shots_on_goal': {'home': None, 'away': None},
-            'shots_inside_box': {'home': None, 'away': None},
-            'shots_outside_box': {'home': None, 'away': None},
-        }
-
-        if not data:
-            logger.debug("No data returned for match metrics %s", fixture_id)
-            return empty_metrics
-
-        # football-data may return match object under 'match' or 'matches'
-        match = data.get('match') or (data.get('matches')[0] if data.get('matches') else None)
-        if not match:
-            logger.debug("No match object found in metrics response for %s", fixture_id)
-            return empty_metrics
-
-        # If there were detailed statistics, parse them here. For now, return empty_metrics
-        logger.debug("Match details fetched for %s but no detailed shot statistics available in response", fixture_id)
+        logger.debug("Sin métricas cacheadas para fixture %s; se omite request individual para evitar rate limits", fixture_id)
         return empty_metrics
