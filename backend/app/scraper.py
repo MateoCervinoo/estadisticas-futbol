@@ -50,7 +50,7 @@ def actualizar_partidos_post_partido():
 
     Diseñado para ejecutarse periódicamente (p. ej. 4 veces/día).
     """
-    ahora = datetime.utcnow()
+    ahora = datetime.now(timezone.utc)
     with Session(engine) as session:
         stmt = select(Partido).where(Partido.fecha_utc <= ahora, Partido.estado == "programado")
         resultados = session.exec(stmt).all()

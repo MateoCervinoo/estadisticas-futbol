@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlmodel import Session, select
@@ -138,7 +138,7 @@ def _process_matches(matches, fuente: str, mapper, league_config, session) -> in
                 existing.home_crest_url = home_crest
                 existing.away_crest_url = away_crest
                 existing.torneo_id = torneo_id
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
         else:
             partido = Partido(
                 fixture_id=str(fixture_id) if isinstance(fixture_id, int) else None,
@@ -175,7 +175,7 @@ def _parse_date(date_str: str) -> datetime:
     try:
         return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
     except Exception:
-        return datetime.utcnow()
+        return datetime.now(timezone.utc)
 
 
 def main():

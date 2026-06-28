@@ -27,7 +27,7 @@ def _env(key: str, default: str = "") -> str:
 
 
 class Settings:
-    DB_ENGINE: str = _env("ENTRENADOR_DB_ENGINE", "sqlite")
+    DB_ENGINE: str = _env("ENTRENADOR_DB_ENGINE", "postgresql")
     SQLITE_PATH: str = _env("ENTRENADOR_SQLITE_PATH", str(DEFAULT_DATA_DIR / "entrenador.db"))
     POSTGRES_URL: str = _env("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/estadisticas")
 
@@ -91,27 +91,26 @@ LEAGUES_REGISTRY: List[LeagueConfig] = [
     #LeagueConfig("Copa América", "Copa América", "CA", tipo="continental", categoria="seleccion", pais="SA", nivel=2),
     LeagueConfig("Eurocopa", "European Championship", "EC", tipo="continental", categoria="seleccion", nivel=2),
     #LeagueConfig("Clasificatorias Mundial", "World Cup Qualification", "WQC", tipo="clasificatorias", categoria="seleccion", nivel=3),
-    LeagueConfig("Premier League", "Premier League", "PL", "EPL", tipo="liga", categoria="club", pais="GB", nivel=1,
+    LeagueConfig("Premier League", "ENG-Premier League", "PL", "EPL", tipo="liga", categoria="club", pais="GB", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
                  understat_seasons=["2020", "2021", "2022", "2023", "2024"],
                  football_data_league_code="PL"),
-    LeagueConfig("La Liga", "La Liga", "PD", "La_liga", tipo="liga", categoria="club", pais="ES", nivel=1,
+    LeagueConfig("La Liga", "ESP-La Liga", "PD", "La_liga", tipo="liga", categoria="club", pais="ES", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
                  understat_seasons=["2020", "2021", "2022", "2023", "2024"],
                  football_data_league_code="PD"),
-    LeagueConfig("Serie A", "Serie A", "SA", "Serie_A", tipo="liga", categoria="club", pais="IT", nivel=1,
+    LeagueConfig("Serie A", "ITA-Serie A", "SA", "Serie_A", tipo="liga", categoria="club", pais="IT", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
                  understat_seasons=["2020", "2021", "2022", "2023", "2024"],
                  football_data_league_code="SA"),
-    LeagueConfig("Bundesliga", "Bundesliga", "BL1", "Bundesliga", tipo="liga", categoria="club", pais="DE", nivel=1,
+    LeagueConfig("Bundesliga", "GER-Bundesliga", "BL1", "Bundesliga", tipo="liga", categoria="club", pais="DE", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
                  football_data_league_code="BL1"),
-    LeagueConfig("Ligue 1", "Ligue 1", "FL1", "Ligue_1", tipo="liga", categoria="club", pais="FR", nivel=1,
+    LeagueConfig("Ligue 1", "FRA-Ligue 1", "FL1", "Ligue_1", tipo="liga", categoria="club", pais="FR", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
                  football_data_league_code="FL1"),
-    LeagueConfig("Champions League", "Champions League", "CL", "UCL", tipo="copa", categoria="club", nivel=1,
-                 fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
-                 understat_seasons=["2020", "2021", "2022", "2023", "2024"],
+    LeagueConfig("Champions League", None, "CL", "UCL", tipo="copa", categoria="club", nivel=1,
+                 fbref_seasons=[], understat_seasons=[],  # FBref no tiene Champions League como liga standalone
                  football_data_league_code="CL"),
     #LeagueConfig("Copa Libertadores", "Copa Libertadores", "CLI", None, tipo="copa", categoria="club", pais="SA", nivel=1,
                  #fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],

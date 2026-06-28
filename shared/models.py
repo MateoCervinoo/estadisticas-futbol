@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlmodel import SQLModel, Field, Column, JSON, BigInteger, SmallInteger, UniqueConstraint, Index
@@ -20,8 +20,8 @@ class Equipo(SQLModel, table=True):
     codigo_bandera: Optional[str] = Field(default=None, max_length=2)
     tipo: str = Field(default="seleccion", max_length=20)
     activo: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Torneo(SQLModel, table=True):
@@ -35,7 +35,7 @@ class Torneo(SQLModel, table=True):
     categoria: str = Field(max_length=20)
     pais: Optional[str] = Field(default=None, max_length=3)
     nivel: Optional[int] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Sede(SQLModel, table=True):
@@ -47,7 +47,7 @@ class Sede(SQLModel, table=True):
     pais: Optional[str] = Field(default=None, max_length=3)
     neutral: bool = False
     capacidad: Optional[int] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Arbitro(SQLModel, table=True):
@@ -56,7 +56,7 @@ class Arbitro(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     nombre: str = Field(max_length=150)
     pais: Optional[str] = Field(default=None, max_length=3)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class Partido(SQLModel, table=True):
@@ -106,8 +106,8 @@ class Partido(SQLModel, table=True):
     xg_local: Optional[float] = None
     xg_visitante: Optional[float] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("fixture_id_externo", "fuente_origen"),
@@ -163,8 +163,8 @@ class PartidoEstadisticas(SQLModel, table=True):
     formacion_local: Optional[str] = None
     formacion_visitante: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class EquipoElo(SQLModel, table=True):
@@ -230,7 +230,7 @@ class ModelFeatures(SQLModel, table=True):
     h2h_goles_local: Optional[int] = None
     h2h_goles_visitante: Optional[int] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("partido_id", "version_features"),
@@ -246,7 +246,7 @@ class SourceCoverage(SQLModel, table=True):
     temporada: str = Field(max_length=20)
     total_partidos: int = 0
     partidos_con_stats: int = 0
-    ultima_sync: datetime = Field(default_factory=datetime.utcnow)
+    ultima_sync: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("fuente", "torneo_id", "temporada"),
@@ -259,7 +259,7 @@ class SyncLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     fuente: str = Field(max_length=30)
     tipo: str = Field(max_length=20)
-    fecha_inicio: datetime = Field(default_factory=datetime.utcnow)
+    fecha_inicio: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     fecha_fin: Optional[datetime] = None
     partidos_procesados: int = 0
     partidos_nuevos: int = 0

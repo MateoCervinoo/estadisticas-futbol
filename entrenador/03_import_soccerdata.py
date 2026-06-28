@@ -1,11 +1,11 @@
 from __future__ import annotations
 import logging
 from typing import Dict, List, Set
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from .config import settings
+from .config import settings, LEAGUES_REGISTRY
 from .database import get_engine, init_db
 from .models import Partido, PartidoEstadisticas, EquipoElo, Torneo, SourceCoverage
 from .sources.fbref import FBrefClient
@@ -26,16 +26,19 @@ def import_fbref_stats() -> int:
     total = 0
 
     with Session(engine) as session:
-        for league_config in settings.LEAGUES_REGISTRY:
+        for league_config in LEAGUES_REGISTRY:
             # Resolver torneo_id real desde el nombre_canonico
             torneo = session.exec(
                 select(Torneo).where(Torneo.nombre_canonico == league_config.nombre_canonico)
             ).first()
             coverage_torneo_id = torneo.id if torneo else None
 
+            fbref_name = league_config.nombre_fbref
+            if not fbref_name:
+                continue
             for season in (league_config.fbref_seasons or []):
-                logger.info("Obteniendo FBref: %s %s", league_config.nombre_fbref, season)
-                stats = client.get_match_stats(league_config.nombre_fbref, season)
+                logger.info("Obteniendo FBref: %s %s", fbref_name, season)
+                stats = client.get_match_stats(fbref_name, season)
                 if not stats:
                     continue
 
@@ -63,7 +66,7 @@ def import_fbref_stats() -> int:
                             if key in ("hash_dedupe", "fuente") or value is None:
                                 continue
                             setattr(existing_stats, key, value)
-                        existing_stats.updated_at = datetime.utcnow()
+                        existing_stats.updated_at = datetime.now(timezone.utc)
                     else:
                         pe = PartidoEstadisticas(
                             partido_id=partido.id,
@@ -77,7 +80,7 @@ def import_fbref_stats() -> int:
                 session.commit()
                 total += updated
                 logger.info("  → %d partidos enriquecidos con FBref (%s %s)", updated,
-                            league_config.nombre_fbref, season)
+                            fbref_name, season)
 
                 coverage = session.exec(
                     select(SourceCoverage).where(
@@ -88,12 +91,12 @@ def import_fbref_stats() -> int:
                 ).first()
                 if coverage:
                     coverage.partidos_con_stats = updated
-                    coverage.ultima_sync = datetime.utcnow()
+                    coverage.ultima_sync = datetime.now(timezone.utc)
                 else:
                     session.add(SourceCoverage(
                         fuente="fbref", torneo_id=coverage_torneo_id,
                         temporada=season, total_partidos=updated,
-                        partidos_con_stats=updated, ultima_sync=datetime.utcnow(),
+                        partidos_con_stats=updated, ultima_sync=datetime.now(timezone.utc),
                     ))
                 session.commit()
 

@@ -113,6 +113,18 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             status = normalize_status(raw_status, source="api")
             tournament = normalize_tournament('Mundial')
 
+            # Resolver torneo_id
+            torneo_id = None
+            try:
+                from .models import Torneo
+                torneo = session.exec(
+                    select(Torneo).where(Torneo.nombre_canonico == "FIFA World Cup")
+                ).first()
+                if torneo:
+                    torneo_id = torneo.id
+            except Exception:
+                torneo_id = None
+
             # Mapear nombres de la API a IDs de Equipo si existe la tabla
             home_team_id = None
             away_team_id = None
@@ -136,6 +148,8 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                     # Crear nuevo registro
                     partido = Partido(
                         fixture_id=fixture_id,
+                        fuente_origen="api_football_data",
+                        torneo_id=torneo_id,
                         fecha_utc=date or datetime.now(timezone.utc),
                         home_team=home_team or "",
                         away_team=away_team or "",

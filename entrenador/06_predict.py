@@ -2,7 +2,8 @@ from __future__ import annotations
 import logging
 import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from pathlib import Path
+from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
@@ -28,7 +29,7 @@ def predict_upcoming_matches() -> List[Dict[str, Any]]:
         upcoming = session.exec(
             select(Partido).where(
                 Partido.estado.in_(["NS", "TIMED"]),
-                Partido.fecha_utc >= datetime.utcnow(),
+                Partido.fecha_utc >= datetime.now(timezone.utc),
             )
         ).all()
 
@@ -37,10 +38,22 @@ def predict_upcoming_matches() -> List[Dict[str, Any]]:
             return []
 
         for partido in upcoming:
-            local = session.get(Equipo, partido.equipo_local_id)
-            visit = session.get(Equipo, partido.equipo_visitante_id)
-            home_name = local.nombre_canonico or local.nombre_csv or f"team_{partido.equipo_local_id}" if local else ""
-            away_name = visit.nombre_canonico or visit.nombre_csv or f"team_{partido.equipo_visitante_id}" if visit else ""
+            home_name = ""
+            away_name = ""
+
+            if partido.equipo_local_id:
+                local = session.get(Equipo, partido.equipo_local_id)
+                if local:
+                    home_name = local.nombre_canonico or local.nombre_csv or f"team_{partido.equipo_local_id}"
+            if not home_name and partido.home_team:
+                home_name = partido.home_team
+
+            if partido.equipo_visitante_id:
+                visit = session.get(Equipo, partido.equipo_visitante_id)
+                if visit:
+                    away_name = visit.nombre_canonico or visit.nombre_csv or f"team_{partido.equipo_visitante_id}"
+            if not away_name and partido.away_team:
+                away_name = partido.away_team
 
             if not home_name or not away_name:
                 continue
@@ -86,7 +99,7 @@ def predict_custom(home_team: str, away_team: str, neutral: bool = True) -> Dict
 def main():
     predictions = predict_upcoming_matches()
     if predictions:
-        output_path = settings.MODEL_PARAMS_PATH.parent / "predictions.json"
+        output_path = Path(settings.MODEL_PARAMS_PATH).parent / "predictions.json"
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(predictions, f, ensure_ascii=False, indent=2)
         logger.info("Predicciones guardadas en %s", output_path)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from typing import Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from sqlmodel import Session, select
@@ -45,7 +45,7 @@ def train_from_features() -> Dict[str, Any]:
         "n_equipos": len(model.get("teams", [])),
         "gamma": model.get("gamma", 0),
         "rho": model.get("rho", 0),
-        "trained_at": datetime.utcnow().isoformat(),
+        "trained_at": datetime.now(timezone.utc).isoformat(),
     }
     logger.info("Estadísticas entrenamiento: %s", stats)
     return stats

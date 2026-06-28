@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from sqlmodel import Session, select
@@ -104,7 +104,7 @@ def import_results_csv(csv_path: str = None) -> int:
                     existing.goles_visitante = int(row["away_score"])
                     existing.estado = "FT"
                     existing.torneo_id = torneo_id
-                    existing.updated_at = datetime.utcnow()
+                    existing.updated_at = datetime.now(timezone.utc)
                     updated += 1
             else:
                 partido = Partido(
