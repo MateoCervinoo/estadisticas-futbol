@@ -52,7 +52,7 @@ def actualizar_partidos_post_partido():
     """
     ahora = datetime.utcnow()
     with Session(engine) as session:
-        stmt = select(Partido).where(Partido.fecha <= ahora, Partido.estado == "programado")
+        stmt = select(Partido).where(Partido.fecha_utc <= ahora, Partido.estado == "programado")
         resultados = session.exec(stmt).all()
         for partido in resultados:
             # En una implementación real usaríamos un match_url almacenado o

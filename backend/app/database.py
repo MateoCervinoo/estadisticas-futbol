@@ -27,12 +27,25 @@ def init_db():
 def ensure_partido_columns():
     """Garantiza columnas nuevas en tablas existentes sin usar migraciones externas."""
     statements = [
-        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS ht_home_score INTEGER",
-        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS ht_away_score INTEGER",
-        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS stage VARCHAR",
-        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS \"group\" VARCHAR",
+        # Columnas del modelo unificado shared/models.py
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS fixture_id INTEGER",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS fixture_id_externo VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS hash_dedupe VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS fecha_utc TIMESTAMP",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS torneo_id INTEGER",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS etapa VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS grupo VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS home_team VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS away_team VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS tournament VARCHAR",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS home_crest_url VARCHAR",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS away_crest_url VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS goles_local_ht INTEGER",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS goles_visitante_ht INTEGER",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS xg_local REAL",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS xg_visitante REAL",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP",
     ]
     with engine.begin() as conn:
         for stmt in statements:

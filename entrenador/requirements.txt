@@ -1,0 +1,25 @@
+# Core
+sqlmodel>=0.0.16
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# Model training
+scipy>=1.10.0
+
+# API sources
+requests>=2.28.0
+
+# Soccerdata (optional — install extras as needed)
+# soccerdata>=2.0.0
+
+# ML models (optional — Fase 2)
+# scikit-learn>=1.2.0
+# xgboost>=2.0.0
+# optuna>=3.0.0
+
+# Development
+python-dotenv>=1.0.0
