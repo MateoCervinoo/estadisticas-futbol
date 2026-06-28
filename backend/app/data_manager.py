@@ -219,9 +219,10 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce").fillna(0).astype(int)
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce").fillna(0).astype(int)
 
-    # Generar fixture_id determinístico usando md5 sobre fecha+equipos
+    # Generar fixture_id determinístico usando md5 sobre fecha+equipos+torneo
     def make_fixture_id(row):
-        key = f"{row['date'].isoformat()}|{row['home_team']}|{row['away_team']}"
+        tournament = row.get('tournament', '')
+        key = f"{row['date'].isoformat()}|{row['home_team']}|{row['away_team']}|{tournament}"
         md = hashlib.md5(key.encode("utf-8")).hexdigest()
         # Reducir a rango de enteros 32-bit para mayor compatibilidad
         return int(md, 16) % (2 ** 31 - 1)
@@ -253,37 +254,31 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
             # Buscar partido existente por fixture_id
             existing = session.exec(select(Partido).where(Partido.fixture_id == fid)).first()
             if existing:
-                # Actualizar campos esenciales
-                existing.date = row["date"]
+                existing.fecha_utc = row["date"]
                 existing.home_team = row["home_team"]
                 existing.away_team = row["away_team"]
-                existing.home_score = int(row["home_score"]) if pd.notna(row["home_score"]) else None
-                existing.away_score = int(row["away_score"]) if pd.notna(row["away_score"]) else None
-                # Desde CSV asumimos que los históricos son partidos jugados -> FT
-                existing.status = normalize_status("FINISHED", source="csv")
-                # Mapear torneo si viene en el CSV
+                existing.goles_local = int(row["home_score"]) if pd.notna(row["home_score"]) else None
+                existing.goles_visitante = int(row["away_score"]) if pd.notna(row["away_score"]) else None
+                existing.estado = normalize_status("FINISHED", source="csv")
                 if 'tournament' in row.index:
                     existing.tournament = normalize_tournament(row.get('tournament'))
-                # También actualizar referencias a Equipo si fueron encontradas
                 if home_team_id is not None:
-                    existing.home_team_id = home_team_id
+                    existing.equipo_local_id = home_team_id
                 if away_team_id is not None:
-                    existing.away_team_id = away_team_id
+                    existing.equipo_visitante_id = away_team_id
                 session.add(existing)
             else:
                 nuevo = Partido(
                     fixture_id=fid,
-                    date=row["date"],
+                    fecha_utc=row["date"],
                     home_team=row["home_team"],
                     away_team=row["away_team"],
-                    home_team_id=home_team_id,
-                    away_team_id=away_team_id,
-                    home_score=int(row["home_score"]) if pd.notna(row["home_score"]) else None,
-                    away_score=int(row["away_score"]) if pd.notna(row["away_score"]) else None,
-                    # Históricos del CSV son finalizados
-                    status=normalize_status("FINISHED", source="csv"),
+                    equipo_local_id=home_team_id,
+                    equipo_visitante_id=away_team_id,
+                    goles_local=int(row["home_score"]) if pd.notna(row["home_score"]) else None,
+                    goles_visitante=int(row["away_score"]) if pd.notna(row["away_score"]) else None,
+                    estado=normalize_status("FINISHED", source="csv"),
                 )
-                # Mapear torneo si viene en el CSV
                 if 'tournament' in row.index:
                     nuevo.tournament = normalize_tournament(row.get('tournament'))
                 session.add(nuevo)

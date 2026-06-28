@@ -340,7 +340,7 @@ export default function Home() {
           </div>
           <div className="clock-pill text-end">
             <div className="small text-muted">Hoy</div>
-            <div className="fw-semibold">{formatClock(now)}</div>
+            <div className="fw-semibold" suppressHydrationWarning>{formatClock(now)}</div>
           </div>
         </div>
         <hr className="border-top border-secondary mb-5" />

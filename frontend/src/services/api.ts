@@ -36,7 +36,7 @@ async function safeJson(response: Response) {
 
 export async function getPartidos(): Promise<Partido[]> {
   try {
-    const res = await fetch(`${BASE_URL}/partidos`)
+    const res = await fetch(`${BASE_URL}/partidos?mundial=true&proximos=true`)
     if (!res.ok) {
       // Try to include response body to ease debugging
       const body = await res.text()

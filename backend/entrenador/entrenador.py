@@ -125,7 +125,7 @@ def fit_dixon_coles(df: pd.DataFrame) -> Dict[str, Any]:
         'defense': defense,
         'gamma': gamma,
         'rho': rho,
-        'saved_at': datetime.datetime.utcnow().isoformat() + 'Z',
+        'saved_at': datetime.datetime.now(timezone.utc).isoformat() + 'Z',
     }
 
     return model

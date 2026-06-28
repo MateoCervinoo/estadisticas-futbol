@@ -5,6 +5,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
+from sqlalchemy import or_
 
 from .database import engine, ensure_partido_columns
 from .models import Partido, Equipo
@@ -126,61 +127,81 @@ app.add_middleware(
 )
 
 
+def _enrich_partido_item(p: Partido, session: Session) -> dict:
+    item = p.dict()
+
+    # Mapear nombres de campos del modelo unificado (español) al frontend (inglés)
+    FIELD_MAP = {
+        "date": "fecha_utc",
+        "home_score": "goles_local",
+        "away_score": "goles_visitante",
+        "status": "estado",
+        "stage": "etapa",
+        "group": "grupo",
+        "ht_home_score": "goles_local_ht",
+        "ht_away_score": "goles_visitante_ht",
+    }
+    for eng, spa in FIELD_MAP.items():
+        item[eng] = item.get(spa)
+
+    try:
+        # Resolver nombre/localidad del equipo local
+        if p.equipo_local_id:
+            he = session.get(Equipo, p.equipo_local_id)
+            if he:
+                item["home_nombre_es"] = he.nombre_es
+                item["home_codigo_bandera"] = he.codigo_bandera
+                if not item.get("home_team"):
+                    item["home_team"] = he.nombre_canonico
+        # Resolver nombre/localidad del equipo visitante
+        if p.equipo_visitante_id:
+            ae = session.get(Equipo, p.equipo_visitante_id)
+            if ae:
+                item["away_nombre_es"] = ae.nombre_es
+                item["away_codigo_bandera"] = ae.codigo_bandera
+                if not item.get("away_team"):
+                    item["away_team"] = ae.nombre_canonico
+    except Exception:
+        pass
+
+    return item
+
+
 @app.get("/api/partidos")
-def api_list_partidos():
-    """Devuelve todos los partidos ordenados por fecha."""
+def api_list_partidos(mundial: bool = False, proximos: bool = False):
+    """Devuelve partidos ordenados por fecha.
+    - mundial=true: solo FIFA World Cup
+    - proximos=true: solo estados NS/TIMED
+    - ambos: unión de ambos filtros
+    """
     with Session(engine) as session:
-        # Hacer LEFT JOIN con Equipo para incluir nombres en español y códigos de bandera
-        stmt = select(Partido).order_by(Partido.date)
+        stmt = select(Partido).order_by(Partido.fecha_utc)
+
+        conditions = []
+        if mundial:
+            from .models import Torneo
+            t = session.exec(
+                select(Torneo).where(Torneo.nombre_canonico == "FIFA World Cup")
+            ).first()
+            if t:
+                conditions.append(Partido.torneo_id == t.id)
+        if proximos:
+            conditions.append(Partido.estado.in_(["NS", "TIMED"]))
+
+        if conditions:
+            stmt = stmt.where(or_(*conditions))
+
         partidos: List[Partido] = session.exec(stmt).all()
-
-        out = []
-        for p in partidos:
-            item = p.dict()
-            # Intentar anexar información de home/away desde tabla Equipo
-            try:
-                if p.home_team_id:
-                    he = session.get(Equipo, p.home_team_id)
-                    if he:
-                        item["home_nombre_es"] = he.nombre_es
-                        item["home_codigo_bandera"] = he.codigo_bandera
-                if p.away_team_id:
-                    ae = session.get(Equipo, p.away_team_id)
-                    if ae:
-                        item["away_nombre_es"] = ae.nombre_es
-                        item["away_codigo_bandera"] = ae.codigo_bandera
-            except Exception:
-                # No bloquear la respuesta si algo falla
-                pass
-            out.append(item)
-
-        return out
+        return [_enrich_partido_item(p, session) for p in partidos]
 
 
 @app.get("/api/partidos/finalizados")
 def api_list_partidos_finalizados():
     """Devuelve únicamente los partidos con estado 'FT' (finalizados)."""
     with Session(engine) as session:
-        stmt = select(Partido).where(Partido.status == "FT").order_by(Partido.date)
+        stmt = select(Partido).where(Partido.estado == "FT").order_by(Partido.fecha_utc)
         partidos: List[Partido] = session.exec(stmt).all()
-        out = []
-        for p in partidos:
-            item = p.dict()
-            try:
-                if p.home_team_id:
-                    he = session.get(Equipo, p.home_team_id)
-                    if he:
-                        item["home_nombre_es"] = he.nombre_es
-                        item["home_codigo_bandera"] = he.codigo_bandera
-                if p.away_team_id:
-                    ae = session.get(Equipo, p.away_team_id)
-                    if ae:
-                        item["away_nombre_es"] = ae.nombre_es
-                        item["away_codigo_bandera"] = ae.codigo_bandera
-            except Exception:
-                pass
-            out.append(item)
-        return out
+        return [_enrich_partido_item(p, session) for p in partidos]
 
 
 # Endpoint /api/partidos/{partido_id}/prediccion implemented below. Kept only one route to avoid duplicates.
@@ -204,14 +225,14 @@ def partido_prediccion_alt(partido_id: int):
 
     try:
         with Session(engine) as session:
-            if partido.home_team_id:
-                he = session.get(Equipo, partido.home_team_id)
-                if he and he.nombre_csv:
-                    home_name_for_model = he.nombre_csv
-            if partido.away_team_id:
-                ae = session.get(Equipo, partido.away_team_id)
-                if ae and ae.nombre_csv:
-                    away_name_for_model = ae.nombre_csv
+                    if partido.equipo_local_id:
+                        he = session.get(Equipo, partido.equipo_local_id)
+                        if he and he.nombre_csv:
+                            home_name_for_model = he.nombre_csv
+                    if partido.equipo_visitante_id:
+                        ae = session.get(Equipo, partido.equipo_visitante_id)
+                        if ae and ae.nombre_csv:
+                            away_name_for_model = ae.nombre_csv
     except Exception:
         # No bloquear; usaremos los nombres originales como fallback
         logger.exception("Error resolviendo Equipo para partido %s; usando nombres sin normalizar", partido.fixture_id)

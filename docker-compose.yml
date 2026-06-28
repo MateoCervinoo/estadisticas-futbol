@@ -32,6 +32,7 @@ services:
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
+      - ./shared:/app/shared:cached
     ports:
       - "8000:8000"
 
@@ -49,6 +50,7 @@ services:
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
+      - ./shared:/app/shared:cached
     command: >
       sh -c "while true; do
       python -c 'from app.sync import sync_fixtures_and_metrics; print(sync_fixtures_and_metrics())';
