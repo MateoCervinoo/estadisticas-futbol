@@ -16,6 +16,112 @@ def normalize_team_name(name: str) -> str:
     return s
 
 
+def fit_dixon_coles_xg(df: pd.DataFrame) -> Dict[str, Any]:
+    """Extended Dixon-Coles with xG features.
+
+    Expects DataFrame columns:
+      local_name, visit_name, goles_local, goles_visitante,
+      xg_local, xg_visitante  (may be NaN/None)
+    """
+    teams = sorted(set(df["local_name"].unique()) | set(df["visit_name"].unique()))
+    team_to_idx = {t: i for i, t in enumerate(teams)}
+
+    overall_home = df["goles_local"].mean()
+    overall_away = df["goles_visitante"].mean()
+    overall = np.mean([overall_home, overall_away])
+    overall = max(overall, 0.01)
+
+    xg_ok = df["xg_local"].notna() & df["xg_visitante"].notna()
+    has_any_xg = xg_ok.any()
+    if has_any_xg:
+        xg_home_avg = df.loc[xg_ok, "xg_local"].mean()
+        xg_away_avg = df.loc[xg_ok, "xg_visitante"].mean()
+        xg_overall = np.mean([xg_home_avg, xg_away_avg])
+        xg_overall = max(xg_overall, 0.01)
+    else:
+        xg_home_avg = overall_home
+        xg_away_avg = overall_away
+        xg_overall = overall
+
+    goals_for: Dict[str, list] = {t: [] for t in teams}
+    goals_against: Dict[str, list] = {t: [] for t in teams}
+    xg_for: Dict[str, list] = {t: [] for t in teams}
+    xg_against: Dict[str, list] = {t: [] for t in teams}
+
+    residuals_local: list = []
+    residuals_visit: list = []
+
+    for _, r in df.iterrows():
+        ht = r["local_name"]
+        at = r["visit_name"]
+        gl = float(r["goles_local"])
+        gv = float(r["goles_visitante"])
+        goals_for[ht].append(gl)
+        goals_against[ht].append(gv)
+        goals_for[at].append(gv)
+        goals_against[at].append(gl)
+
+        xgl = float(r["xg_local"]) if pd.notna(r.get("xg_local")) else None
+        xgv = float(r["xg_visitante"]) if pd.notna(r.get("xg_visitante")) else None
+
+        if xgl is not None and xgv is not None:
+            xg_for[ht].append(xgl)
+            xg_against[ht].append(xgv)
+            xg_for[at].append(xgv)
+            xg_against[at].append(xgl)
+            residuals_local.append(gl - xgl)
+            residuals_visit.append(gv - xgv)
+
+    attack = []
+    defense = []
+    xg_attack = []
+    xg_defense = []
+
+    for t in teams:
+        gf = np.mean(goals_for[t]) if goals_for[t] else overall
+        ga = np.mean(goals_against[t]) if goals_against[t] else overall
+        attack.append(float(gf / overall))
+        defense.append(float(ga / overall))
+
+        if has_any_xg and xg_for[t]:
+            xgf = np.mean(xg_for[t])
+            xga = np.mean(xg_against[t])
+            xg_attack.append(float(xgf / xg_overall))
+            xg_defense.append(float(xga / xg_overall))
+        else:
+            xg_attack.append(float(gf / overall))
+            xg_defense.append(float(ga / overall))
+
+    gamma = float(overall_home - overall_away)
+    rho = settings.DIXON_COLES_RHO
+
+    rho_xg = 0.0
+    if len(residuals_local) > 1 and len(residuals_visit) > 1:
+        try:
+            rho_xg = float(np.corrcoef(residuals_local, residuals_visit)[0, 1])
+            if not np.isfinite(rho_xg):
+                rho_xg = 0.0
+        except Exception:
+            rho_xg = 0.0
+
+    norm_teams = [normalize_team_name(t) for t in teams]
+    model = {
+        "attack": dict(zip(norm_teams, attack)),
+        "defense": dict(zip(norm_teams, defense)),
+        "xg_attack": dict(zip(norm_teams, xg_attack)),
+        "xg_defense": dict(zip(norm_teams, xg_defense)),
+        "gamma": gamma,
+        "rho": rho,
+        "rho_xg": rho_xg,
+        "feature_weights": {"xg_blend": 0.5},
+        "teams": norm_teams,
+        "team_to_idx": {normalize_team_name(t): i for t, i in team_to_idx.items()},
+        "saved_at": pd.Timestamp.utcnow().isoformat(),
+        "model_type": "selecciones",
+    }
+    return model
+
+
 def fit_dixon_coles(df: pd.DataFrame) -> Dict[str, Any]:
     teams = sorted(set(df["local_name"].unique()) | set(df["visit_name"].unique()))
     team_to_idx = {t: i for i, t in enumerate(teams)}
@@ -90,6 +196,34 @@ def predict_match(home_team: str, away_team: str, model: Dict[str, Any],
 
     lambda_h = math.exp(eta_h)
     lambda_a = math.exp(eta_a)
+
+    # --- xG blend if model has xg_attack/xg_defense ---
+    xg_atk = model.get("xg_attack", {})
+    xg_df = model.get("xg_defense", {})
+    rho_xg = float(model.get("rho_xg", 0.0))
+    fw = model.get("feature_weights", {})
+    xg_blend = float(fw.get("xg_blend", 0.0))
+
+    if xg_atk and xg_df and abs(xg_blend) > 1e-12:
+        if isinstance(xg_atk, dict):
+            xg_atk = {normalize_team_name(k): float(v) for k, v in xg_atk.items()}
+        if isinstance(xg_df, dict):
+            xg_df = {normalize_team_name(k): float(v) for k, v in xg_df.items()}
+
+        xg_atk_h = float(xg_atk.get(hkey, 1.0))
+        xg_def_a = float(xg_df.get(akey, 1.0))
+        xg_atk_a = float(xg_atk.get(akey, 1.0))
+        xg_def_h = float(xg_df.get(hkey, 1.0))
+
+        xg_eta_h = float(np.clip(xg_atk_h - xg_def_a + gamma_h, -700, 700))
+        xg_eta_a = float(np.clip(xg_atk_a - xg_def_h, -700, 700))
+
+        xg_lambda_h = math.exp(xg_eta_h)
+        xg_lambda_a = math.exp(xg_eta_a)
+
+        lambda_h = (1.0 - xg_blend) * lambda_h + xg_blend * xg_lambda_h
+        lambda_a = (1.0 - xg_blend) * lambda_a + xg_blend * xg_lambda_a
+        rho = rho_xg if abs(rho_xg) > 1e-12 else rho
 
     size = max_goals + 1
     P = np.zeros((size, size), dtype=float)
