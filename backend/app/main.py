@@ -8,7 +8,7 @@ from sqlmodel import Session, select, SQLModel
 from sqlalchemy import or_, and_
 
 from .database import engine, ensure_partido_columns
-from .models import Partido, Equipo
+from .models import Partido, Equipo, PartidoEstadisticas
 from .dixoncoles import predict_match, predict_exact_score_matrix
 from .sync import sync_fixtures_and_metrics
 import pandas as pd
@@ -224,6 +224,23 @@ def api_list_partidos_finalizados():
         stmt = select(Partido).where(Partido.estado == "FT").order_by(Partido.fecha_utc)
         partidos: List[Partido] = session.exec(stmt).all()
         return [_enrich_partido_item(p, session) for p in partidos]
+
+
+@app.get("/api/partidos/{partido_id}/estadisticas")
+def api_partido_estadisticas(partido_id: int):
+    """Devuelve estadísticas avanzadas para un partido."""
+    with Session(engine) as session:
+        partido = session.get(Partido, partido_id)
+        if not partido:
+            raise HTTPException(status_code=404, detail="Partido no encontrado")
+
+        stats = session.exec(
+            select(PartidoEstadisticas).where(PartidoEstadisticas.partido_id == partido_id)
+        ).all()
+
+        result = _enrich_partido_item(partido, session)
+        result['estadisticas'] = [s.dict() for s in stats] if stats else []
+        return result
 
 
 # Endpoint /api/partidos/{partido_id}/prediccion implemented below. Kept only one route to avoid duplicates.

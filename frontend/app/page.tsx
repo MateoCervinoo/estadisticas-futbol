@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { getPartidos, getAniosDisponibles, Partido } from '../src/services/api'
+import { getPartidos, getAniosDisponibles, getPartidoEstadisticas, Partido, PartidoEstadisticas } from '../src/services/api'
 
 type ExactScore = {
   home: number
@@ -43,6 +43,31 @@ const TOURNAMENT_LABELS: Record<string, string> = {
   'Juegos Olímpicos': 'Juegos Olímpicos',
   FIFA_WORLD_CUP: 'Mundial',
   WORLD_CUP: 'Mundial',
+}
+
+const StatRow = ({ label, home, away, fmt = 'int' }: { label: string; home: number; away: number; fmt?: 'int' | 'float' | 'pct' }) => {
+  const fmtVal = (v: number) => {
+    if (fmt === 'pct') return `${Math.round(v)}%`
+    if (fmt === 'float') return v.toFixed(2)
+    return String(Math.round(v))
+  }
+  const total = home + away
+  const homePct = total > 0 ? (home / total) * 100 : 50
+  const homeBar = homePct < 10 ? 10 : homePct > 90 ? 90 : homePct
+  const awayBar = 100 - homeBar
+  return (
+    <div>
+      <div className="d-flex justify-content-between small mb-1">
+        <span className="fw-semibold">{fmtVal(home)}</span>
+        <span className="text-muted">{label}</span>
+        <span className="fw-semibold">{fmtVal(away)}</span>
+      </div>
+      <div className="progress" style={{ height: 6 }}>
+        <div className="progress-bar bg-success" style={{ width: `${homeBar}%` }} />
+        <div className="progress-bar bg-danger" style={{ width: `${awayBar}%` }} />
+      </div>
+    </div>
+  )
 }
 
 const SkeletonCard = () => (
@@ -251,6 +276,8 @@ export default function Home() {
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
   const [prediction, setPrediction] = useState<any | null>(null)
   const [predLoading, setPredLoading] = useState<boolean>(false)
+  const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
+  const [statsLoading, setStatsLoading] = useState<boolean>(false)
   const [fechaLoaded, setFechaLoaded] = useState<boolean>(false)
 
   const allMatches = partidos ?? []
@@ -320,6 +347,12 @@ export default function Home() {
   const openDetail = (p: Partido) => {
     setSelectedMatch(p)
     setModalMode('detail')
+    setCurrentStats(null)
+    setStatsLoading(true)
+    getPartidoEstadisticas(p.id).then((stats) => {
+      setCurrentStats(stats)
+      setStatsLoading(false)
+    })
   }
 
   const closeModal = () => {
@@ -697,9 +730,51 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <div className="small text-muted">
-                            Estadísticas avanzadas (posesión, remates y faltas) no disponibles en este momento.
-                          </div>
+                          {statsLoading && <div className="text-muted small text-center py-3">Cargando estadísticas...</div>}
+
+                          {!statsLoading && currentStats && (
+                            <div>
+                              <div className="fw-semibold mb-2">Estadísticas</div>
+                              <div className="vstack gap-2">
+                                {currentStats.xg_local != null && currentStats.xg_visitante != null && (
+                                  <StatRow label="xG" home={currentStats.xg_local} away={currentStats.xg_visitante} fmt="float" />
+                                )}
+                                {currentStats.remates_local != null && (
+                                  <StatRow label="Remates" home={currentStats.remates_local} away={currentStats.remates_visitante} />
+                                )}
+                                {currentStats.remates_puerta_local != null && (
+                                  <StatRow label="Remates a puerta" home={currentStats.remates_puerta_local} away={currentStats.remates_puerta_visitante} />
+                                )}
+                                {currentStats.posesion_local != null && (
+                                  <StatRow label="Posesión" home={currentStats.posesion_local} away={currentStats.posesion_visitante} fmt="pct" />
+                                )}
+                                {currentStats.corners_local != null && (
+                                  <StatRow label="Córners" home={currentStats.corners_local} away={currentStats.corners_visitante} />
+                                )}
+                                {currentStats.faltas_local != null && (
+                                  <StatRow label="Faltas" home={currentStats.faltas_local} away={currentStats.faltas_visitante} />
+                                )}
+                                {currentStats.tarjetas_amarillas_local != null && (
+                                  <StatRow label="Amarillas" home={currentStats.tarjetas_amarillas_local} away={currentStats.tarjetas_amarillas_visitante} />
+                                )}
+                                {currentStats.tarjetas_rojas_local != null && (
+                                  <StatRow label="Rojas" home={currentStats.tarjetas_rojas_local} away={currentStats.tarjetas_rojas_visitante} />
+                                )}
+                                {currentStats.fueras_juego_local != null && (
+                                  <StatRow label="Fueras de juego" home={currentStats.fueras_juego_local} away={currentStats.fueras_juego_visitante} />
+                                )}
+                                {currentStats.paradas_local != null && (
+                                  <StatRow label="Paradas" home={currentStats.paradas_local} away={currentStats.paradas_visitante} />
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {!statsLoading && !currentStats && (
+                            <div className="small text-muted text-center py-3">
+                              Estadísticas avanzadas no disponibles para este partido.
+                            </div>
+                          )}
                       </div>
                     )}
                   </div>

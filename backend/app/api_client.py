@@ -90,14 +90,22 @@ class APIFootballClient:
                     logger.warning("Errores de la API: %s", data.get('errors'))
                     logger.info("Resultados según la API: %s", data.get('results'))
 
-                # Propagar errores HTTP no relacionados con rate limiting
+                # Silenciar 4xx (no hay datos disponibles, no es error del sistema)
+                # No reintentar 4xx porque no hay datos que recuperar
+                if 400 <= resp.status_code < 500 and resp.status_code != 429:
+                    logger.debug("API responded with %s for %s - no retry for 4xx", resp.status_code, url)
+                    return None
+
                 resp.raise_for_status()
 
                 return data
             except requests.exceptions.RequestException as e:
-                # Si es la última iteración, loguear y devolver None
-                logger.error("Request to %s failed on attempt %s/%s: %s", url, attempt, max_retries, e)
-                # Si la excepción corresponde a 429, ya la gestionamos arriba mediante status_code
+                # Loguear con nivel info (no error) para 4xx
+                resp_status = getattr(e.response, 'status_code', 0) if hasattr(e, 'response') else 0
+                if 400 <= resp_status < 500 and resp_status != 429:
+                    logger.debug("Skipping %s (status %s)", url, resp_status)
+                else:
+                    logger.error("Request to %s failed on attempt %s/%s: %s", url, attempt, max_retries, e)
                 if attempt < max_retries:
                     logger.info("Esperando 6s antes de reintentar... (backoff)")
                     time.sleep(6)
@@ -251,3 +259,86 @@ class APIFootballClient:
 
         logger.debug("Sin métricas cacheadas para fixture %s; se omite request individual para evitar rate limits", fixture_id)
         return empty_metrics
+
+    def fetch_match_statistics(self, fixture_id: int) -> Optional[Dict[str, Any]]:
+        """Obtiene estadísticas detalladas de un partido desde football-data.org.
+
+        endpoint: GET /v4/matches/{fixture_id}
+        Retorna un dict con la estructura de PartidoEstadisticas, o None si no disponible.
+        Solo hace la llamada si hay API key configurada (no mock).
+        """
+        if self.mock or not self.api_key:
+            return None
+
+        url = f"{self.base_url}/matches/{fixture_id}"
+        try:
+            data = self._safe_get(url)
+        except Exception:
+            return None
+        if not data:
+            return None
+
+        match = data.get('match', data)
+        stats_raw = match.get('statistics') or []
+        if not stats_raw:
+            return None
+
+        def _safe_int(val) -> Optional[int]:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return None
+
+        def _safe_float(val) -> Optional[float]:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        stat_map: Dict[str, Dict[str, Any]] = {}
+        for item in stats_raw:
+            stype = (item.get('type') or '').strip().lower()
+            stat_map[stype] = {
+                'home': _safe_int(item.get('home')),
+                'away': _safe_int(item.get('away')),
+            }
+
+        result: Dict[str, Any] = {}
+
+        type_map = {
+            'shots on goal': ('remates_puerta_local', 'remates_puerta_visitante'),
+            'shots off goal': ('remates_fuera_local', 'remates_fuera_visitante'),
+            'total shots': ('remates_local', 'remates_visitante'),
+            'blocked shots': ('remates_bloqueados_local', 'remates_bloqueados_visitante'),
+            'possession': ('posesion_local', 'posesion_visitante'),
+            'corner kicks': ('corners_local', 'corners_visitante'),
+            'fouls': ('faltas_local', 'faltas_visitante'),
+            'yellow cards': ('tarjetas_amarillas_local', 'tarjetas_amarillas_visitante'),
+            'red cards': ('tarjetas_rojas_local', 'tarjetas_rojas_visitante'),
+            'offsides': ('fueras_juego_local', 'fueras_juego_visitante'),
+            'saves': ('paradas_local', 'paradas_visitante'),
+        }
+
+        for api_type, (home_field, away_field) in type_map.items():
+            entry = stat_map.get(api_type)
+            if entry:
+                result[home_field] = entry.get('home')
+                result[away_field] = entry.get('away')
+
+        if 'total shots' in stat_map:
+            remates = stat_map['total shots']
+            result['remates_local'] = remates.get('home')
+            result['remates_visitante'] = remates.get('away')
+
+        if 'shots on goal' in stat_map:
+            sog = stat_map['shots on goal']
+            result['remates_puerta_local'] = sog.get('home')
+            result['remates_puerta_visitante'] = sog.get('away')
+
+        if 'possession' in stat_map:
+            pos = stat_map['possession']
+            result['posesion_local'] = _safe_float(pos.get('home'))
+            result['posesion_visitante'] = _safe_float(pos.get('away'))
+
+        logger.info("Estadísticas obtenidas para fixture %s: %s", fixture_id, {k: v for k, v in result.items() if v is not None})
+        return result if result else None
