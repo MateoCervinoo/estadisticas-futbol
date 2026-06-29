@@ -34,21 +34,35 @@ async function safeJson(response: Response) {
   }
 }
 
-export async function getPartidos(): Promise<Partido[]> {
+export async function getPartidos(year?: number): Promise<Partido[]> {
   try {
-    const res = await fetch(`${BASE_URL}/partidos?mundial=true&proximos=true`)
+    let url = `${BASE_URL}/partidos`
+    const params: string[] = []
+    if (year !== undefined) params.push(`year=${year}`)
+    if (params.length) url += '?' + params.join('&')
+
+    const res = await fetch(url)
     if (!res.ok) {
-      // Try to include response body to ease debugging
       const body = await res.text()
       throw new Error(`Failed to fetch partidos: ${res.status} ${res.statusText} - ${body}`)
     }
     const data = await safeJson(res)
     return data as Partido[]
   } catch (err) {
-    // Log and rethrow so the caller can decide how to handle it
     // eslint-disable-next-line no-console
     console.error('getPartidos error:', err)
     throw err
+  }
+}
+
+export async function getAniosDisponibles(): Promise<number[]> {
+  try {
+    const res = await fetch(`${BASE_URL}/partidos/anyos`)
+    if (!res.ok) return []
+    const data = await safeJson(res)
+    return data as number[]
+  } catch {
+    return []
   }
 }
 
