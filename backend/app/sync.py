@@ -25,6 +25,21 @@ logging.basicConfig(level=logging.INFO)
 
 FINAL_STATUSES = {'FT', 'FINISHED'}
 
+# Competencias de clubes a sincronizar con football-data.org
+# código -> nombre_canonico del Torneo
+CLUB_COMPETITIONS = {
+    "PL": "Premier League",
+    "PD": "La Liga",
+    "SA": "Serie A",
+    "BL1": "Bundesliga",
+    "FL1": "Ligue 1",
+    "CL": "Champions League",
+}
+
+# Últimas 3 temporadas disponibles en free tier (football-data.org)
+# Junio 2026 -> season 2023, 2024, 2025
+CLUB_SEASONS = [2023, 2024, 2025]
+
 
 def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
     """Parsea una ISO string que puede terminar en 'Z' a datetime con tzinfo.
@@ -70,206 +85,190 @@ def _compute_xg_from_metrics(metrics: Dict[str, Any]) -> (Optional[float], Optio
         return None, None
 
 
-def sync_fixtures_and_metrics() -> Dict[str, Any]:
-    """Sincroniza fixtures del Mundial y calcula métricas xG.
+def _fetch_competition(client: APIFootballClient, code: str, season: Optional[int] = None,
+                       torneo_name: str = "FIFA World Cup") -> List[Dict[str, Any]]:
+    """Obtiene fixtures de una competición y los etiqueta con el nombre del torneo."""
+    fixtures = client.get_competition_fixtures(code, season=season)
+    for f in fixtures:
+        if 'torneo_name' not in f:
+            f['torneo_name'] = torneo_name
+    return fixtures
 
-    Reglas principales:
-    - Si el partido no existe, lo crea.
-    - Si existe y pasa a 'FT' desde otro estado, actualiza los goles reales
-      y calcula/almacena el xG.
 
-    Retorna un resumen con conteos y listas de fixtures procesados.
-    """
-    ensure_partido_columns()
-    client = APIFootballClient()  # si no hay API key, entra en modo mock
+def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballClient,
+                     created: List[int], updated: List[int], errors: List[str]) -> None:
+    """Procesa un fixture individual: crea o actualiza el Partido."""
+    fixture_id = f.get('fixture_id')
+    if fixture_id is None:
+        msg = f"Fixture sin fixture_id: {f}"
+        logger.warning(msg)
+        errors.append(msg)
+        return
 
-    fixtures = client.get_world_cup_fixtures()
-    logger.info("Obtenidos %s fixtures desde APIFootballClient", len(fixtures))
+    torneo_name = f.get('torneo_name', 'FIFA World Cup')
+    date = _parse_datetime(f.get('date'))
+    home_team = f.get('home_team')
+    away_team = f.get('away_team')
+    goals_home = f.get('goals_home')
+    goals_away = f.get('goals_away')
+    ht_goals_home = f.get('ht_goals_home')
+    ht_goals_away = f.get('ht_goals_away')
+    stage = f.get('stage')
+    group = f.get('group')
+    home_crest_url = f.get('home_crest_url')
+    away_crest_url = f.get('away_crest_url')
+    raw_status = f.get('status')
+    status = normalize_status(raw_status, source="api")
+    tournament = normalize_tournament(f.get('tournament')) or torneo_name
 
-    created: List[int] = []
-    updated: List[int] = []
-    errors: List[str] = []
+    from .models import Torneo, Equipo
 
-    with Session(engine) as session:
-        for f in fixtures:
-            fixture_id = f.get('fixture_id')
-            if fixture_id is None:
-                msg = f"Fixture sin fixture_id: {f}"
-                logger.warning(msg)
-                errors.append(msg)
-                continue
+    # Resolver torneo_id
+    torneo_id = None
+    try:
+        torneo = session.exec(
+            select(Torneo).where(Torneo.nombre_canonico == torneo_name)
+        ).first()
+        if torneo:
+            torneo_id = torneo.id
+    except Exception:
+        torneo_id = None
 
-            date = _parse_datetime(f.get('date'))
-            home_team = f.get('home_team')
-            away_team = f.get('away_team')
-            goals_home = f.get('goals_home')
-            goals_away = f.get('goals_away')
-            ht_goals_home = f.get('ht_goals_home')
-            ht_goals_away = f.get('ht_goals_away')
-            stage = f.get('stage')
-            group = f.get('group')
-            home_crest_url = f.get('home_crest_url')
-            away_crest_url = f.get('away_crest_url')
-            raw_status = f.get('status')
-            status = normalize_status(raw_status, source="api")
-            tournament = normalize_tournament(f.get('tournament')) or 'Mundial'
+    # Generar hash_dedupe para cross-source dedup
+    date_str = date.strftime("%Y-%m-%d") if date else ""
+    hash_key = f"{date_str}|{(home_team or '').lower().strip()}|{(away_team or '').lower().strip()}|{tournament.lower().strip()}"
+    hash_dedupe = md5(hash_key.encode("utf-8")).hexdigest()
 
-            # Resolver torneo_id
-            torneo_id = None
+    # Mapear nombres de la API a IDs de Equipo
+    home_team_id = None
+    away_team_id = None
+    try:
+        h = session.exec(select(Equipo).where(Equipo.nombre_api == home_team)).first()
+        if h:
+            home_team_id = h.id
+        a = session.exec(select(Equipo).where(Equipo.nombre_api == away_team)).first()
+        if a:
+            away_team_id = a.id
+    except Exception:
+        home_team_id = None
+        away_team_id = None
+
+    # Buscar por fixture_id o hash_dedupe
+    stmt = select(Partido).where(Partido.fixture_id == fixture_id)
+    existing = session.exec(stmt).first()
+    if not existing and hash_dedupe:
+        existing = session.exec(
+            select(Partido).where(Partido.hash_dedupe == hash_dedupe)
+        ).first()
+
+    try:
+        if not existing:
+            partido = Partido(
+                fixture_id=fixture_id,
+                hash_dedupe=hash_dedupe,
+                fuente_origen="api_football_data",
+                torneo_id=torneo_id,
+                fecha_utc=date or datetime.now(timezone.utc),
+                home_team=home_team or "",
+                away_team=away_team or "",
+                equipo_local_id=home_team_id,
+                equipo_visitante_id=away_team_id,
+                goles_local=goals_home,
+                goles_visitante=goals_away,
+                goles_local_ht=ht_goals_home,
+                goles_visitante_ht=ht_goals_away,
+                estado=status,
+                tournament=tournament,
+                etapa=stage,
+                grupo=group,
+                home_crest_url=home_crest_url,
+                away_crest_url=away_crest_url,
+            )
+
+            if status in FINAL_STATUSES:
+                metrics = client.get_match_metrics(fixture_id)
+                home_xg, away_xg = _compute_xg_from_metrics(metrics)
+                partido.xg_local = home_xg
+                partido.xg_visitante = away_xg
+
+            session.add(partido)
+            session.commit()
+            created.append(fixture_id)
+            logger.info("Creado partido fixture_id=%s status=%s (%s)", fixture_id, status, torneo_name)
+        else:
+            local_final = existing.estado in FINAL_STATUSES
+            api_final = status in FINAL_STATUSES or status == 'IN_PLAY'
+            metadata_changed = (
+                existing.etapa != stage
+                or existing.grupo != group
+                or existing.home_crest_url != home_crest_url
+                or existing.away_crest_url != away_crest_url
+                or existing.goles_local_ht != ht_goals_home
+                or existing.goles_visitante_ht != ht_goals_away
+            )
+            score_changed = (
+                existing.goles_local != goals_home
+                or existing.goles_visitante != goals_away
+            )
+
+            allow_update_after_final_hours = False
             try:
-                from .models import Torneo
-                torneo = session.exec(
-                    select(Torneo).where(Torneo.nombre_canonico == "FIFA World Cup")
-                ).first()
-                if torneo:
-                    torneo_id = torneo.id
-            except Exception:
-                torneo_id = None
-
-            # Generar hash_dedupe para cross-source dedup
-            date_str = date.strftime("%Y-%m-%d") if date else ""
-            hash_key = f"{date_str}|{(home_team or '').lower().strip()}|{(away_team or '').lower().strip()}|{tournament.lower().strip()}"
-            hash_dedupe = md5(hash_key.encode("utf-8")).hexdigest()
-
-            # Mapear nombres de la API a IDs de Equipo si existe la tabla
-            home_team_id = None
-            away_team_id = None
-            try:
-                from .models import Equipo
-                h = session.exec(select(Equipo).where(Equipo.nombre_api == home_team)).first()
-                if h:
-                    home_team_id = h.id
-                a = session.exec(select(Equipo).where(Equipo.nombre_api == away_team)).first()
-                if a:
-                    away_team_id = a.id
-            except Exception:
-                home_team_id = None
-                away_team_id = None
-
-            # Buscar por fixture_id o por hash_dedupe (cross-source dedup)
-            stmt = select(Partido).where(Partido.fixture_id == fixture_id)
-            existing = session.exec(stmt).first()
-            if not existing and hash_dedupe:
-                existing = session.exec(
-                    select(Partido).where(Partido.hash_dedupe == hash_dedupe)
-                ).first()
-
-            try:
-                if not existing:
-                    # Crear nuevo registro
-                    partido = Partido(
-                        fixture_id=fixture_id,
-                        hash_dedupe=hash_dedupe,
-                        fuente_origen="api_football_data",
-                        torneo_id=torneo_id,
-                        fecha_utc=date or datetime.now(timezone.utc),
-                        home_team=home_team or "",
-                        away_team=away_team or "",
-                        equipo_local_id=home_team_id,
-                        equipo_visitante_id=away_team_id,
-                        goles_local=goals_home,
-                        goles_visitante=goals_away,
-                        goles_local_ht=ht_goals_home,
-                        goles_visitante_ht=ht_goals_away,
-                        estado=status,
-                        tournament=tournament,
-                        etapa=stage,
-                        grupo=group,
-                        home_crest_url=home_crest_url,
-                        away_crest_url=away_crest_url,
-                    )
-
-                    # Si ya está finalizado, calcular xG
-                    if status in FINAL_STATUSES:
-                        metrics = client.get_match_metrics(fixture_id)
-                        home_xg, away_xg = _compute_xg_from_metrics(metrics)
-                        partido.xg_local = home_xg
-                        partido.xg_visitante = away_xg
-
-                    session.add(partido)
-                    session.commit()
-                    created.append(fixture_id)
-                    logger.info("Creado partido fixture_id=%s status=%s", fixture_id, status)
+                now = datetime.now(timezone.utc)
+                if existing.fecha_utc.tzinfo is None:
+                    match_dt = existing.fecha_utc.replace(tzinfo=timezone.utc)
                 else:
-                    # UPSERT logic: only update when appropriate
-                    # If local is already finalizado, skip updates to avoid overwriting stable data
-                    local_final = existing.estado in FINAL_STATUSES
-                    api_final = status in FINAL_STATUSES or status == 'IN_PLAY'
-                    transitioned_to_final = not local_final and status in FINAL_STATUSES
-                    metadata_changed = (
-                        existing.etapa != stage
-                        or existing.grupo != group
-                        or existing.home_crest_url != home_crest_url
-                        or existing.away_crest_url != away_crest_url
-                        or existing.goles_local_ht != ht_goals_home
-                        or existing.goles_visitante_ht != ht_goals_away
-                    )
-                    score_changed = (
-                        existing.goles_local != goals_home
-                        or existing.goles_visitante != goals_away
-                    )
+                    match_dt = existing.fecha_utc
+                delta_seconds = (now - match_dt).total_seconds()
+                allow_update_after_final_hours = delta_seconds >= (2 * 3600)
+            except Exception:
+                allow_update_after_final_hours = False
 
-                    # If the local record is final, only update if 2 hours have passed since match date
-                    # (approximation for "2 hours since its finalization") or if the API reports a different status
-                    allow_update_after_final_hours = False
-                    try:
-                        now = datetime.now(timezone.utc)
-                        if existing.fecha_utc.tzinfo is None:
-                            match_dt = existing.fecha_utc.replace(tzinfo=timezone.utc)
-                        else:
-                            match_dt = existing.fecha_utc
-                        delta_seconds = (now - match_dt).total_seconds()
-                        allow_update_after_final_hours = delta_seconds >= (2 * 3600)
-                    except Exception:
-                        allow_update_after_final_hours = False
+            if local_final and not allow_update_after_final_hours and status in FINAL_STATUSES and not (metadata_changed or score_changed):
+                logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
+                return
 
-                    if local_final and not allow_update_after_final_hours and status in FINAL_STATUSES and not (metadata_changed or score_changed):
-                        logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
-                        continue
+            if (
+                (existing.estado in ('NS', 'TIMED') and api_final)
+                or (existing.estado != status)
+                or score_changed
+                or metadata_changed
+                or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES)
+            ):
+                existing.goles_local = goals_home
+                existing.goles_visitante = goals_away
+                existing.goles_local_ht = ht_goals_home
+                existing.goles_visitante_ht = ht_goals_away
+                existing.estado = status
+                existing.tournament = tournament
+                existing.etapa = stage
+                existing.grupo = group
+                existing.home_crest_url = home_crest_url
+                existing.away_crest_url = away_crest_url
 
-                    if (
-                        (existing.estado in ('NS', 'TIMED') and api_final)
-                        or (existing.estado != status)
-                        or score_changed
-                        or metadata_changed
-                        or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES)
-                    ):
-                        existing.goles_local = goals_home
-                        existing.goles_visitante = goals_away
-                        existing.goles_local_ht = ht_goals_home
-                        existing.goles_visitante_ht = ht_goals_away
-                        existing.estado = status
-                        existing.tournament = tournament
-                        existing.etapa = stage
-                        existing.grupo = group
-                        existing.home_crest_url = home_crest_url
-                        existing.away_crest_url = away_crest_url
+                if home_team_id is not None:
+                    existing.equipo_local_id = home_team_id
+                if away_team_id is not None:
+                    existing.equipo_visitante_id = away_team_id
 
-                        if home_team_id is not None:
-                            existing.equipo_local_id = home_team_id
-                        if away_team_id is not None:
-                            existing.equipo_visitante_id = away_team_id
+                if status in FINAL_STATUSES:
+                    metrics = client.get_match_metrics(fixture_id)
+                    home_xg, away_xg = _compute_xg_from_metrics(metrics)
+                    existing.xg_local = home_xg
+                    existing.xg_visitante = away_xg
 
-                        if status in FINAL_STATUSES:
-                            metrics = client.get_match_metrics(fixture_id)
-                            home_xg, away_xg = _compute_xg_from_metrics(metrics)
-                            existing.xg_local = home_xg
-                            existing.xg_visitante = away_xg
+                session.add(existing)
+                session.commit()
+                updated.append(fixture_id)
+                logger.info("Actualizado partido fixture_id=%s status=%s (%s)", fixture_id, status, torneo_name)
 
-                        session.add(existing)
-                        session.commit()
-                        updated.append(fixture_id)
-                        logger.info("Actualizado/Upserted partido fixture_id=%s status=%s", fixture_id, status)
+    except Exception as e:
+        msg = f"Error procesando fixture {fixture_id}: {e}"
+        logger.exception(msg)
+        errors.append(msg)
 
-            except Exception as e:
-                msg = f"Error procesando fixture {fixture_id}: {e}"
-                logger.exception(msg)
-                errors.append(msg)
 
-    # Fase 2: Poblar PartidoEstadisticas con xG calculado (si existe en Partido)
-    # football-data.org free tier no provee estadísticas detalladas. El xG local
-    # ya está calculado en Partido.xg_local/xg_visitante. Lo copiamos a PartidoEstadisticas
-    # para que esté disponible via el endpoint de estadísticas.
+def _populate_stats(session: Session) -> int:
+    """Puebla PartidoEstadisticas con xG de Partido para partidos FT."""
     stats_fetched = 0
     try:
         finished = session.exec(
@@ -292,9 +291,60 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             stats_fetched += 1
     except Exception:
         logger.exception("Error poblando PartidoEstadisticas desde xG de Partido")
+    return stats_fetched
+
+
+def sync_fixtures_and_metrics() -> Dict[str, Any]:
+    """Sincroniza fixtures del Mundial y ligas de clubes desde football-data.org.
+
+    Reglas principales:
+    - Si el partido no existe, lo crea.
+    - Si existe y pasa a 'FT' desde otro estado, actualiza los goles reales
+      y calcula/almacena el xG.
+
+    Retorna un resumen con conteos y listas de fixtures procesados.
+    """
+    ensure_partido_columns()
+    client = APIFootballClient()
+
+    created: List[int] = []
+    updated: List[int] = []
+    errors: List[str] = []
+    total_fetched = 0
+
+    # --- Mundial ---
+    fixtures = client.get_world_cup_fixtures()
+    logger.info("Obtenidos %s fixtures del Mundial", len(fixtures))
+    total_fetched += len(fixtures)
+
+    with Session(engine) as session:
+        for f in fixtures:
+            f['torneo_name'] = 'FIFA World Cup'
+            _process_fixture(session, f, client, created, updated, errors)
+
+    # --- Ligas de clubes ---
+    for code, torneo_name in CLUB_COMPETITIONS.items():
+        for season in CLUB_SEASONS:
+            try:
+                fixtures = client.get_competition_fixtures(code, season=season)
+                logger.info("Obtenidos %s fixtures de %s (season=%s)", len(fixtures), code, season)
+                total_fetched += len(fixtures)
+
+                with Session(engine) as session:
+                    for f in fixtures:
+                        f['torneo_name'] = torneo_name
+                        _process_fixture(session, f, client, created, updated, errors)
+            except Exception as e:
+                msg = f"Error obteniendo fixtures de {code} season={season}: {e}"
+                logger.exception(msg)
+                errors.append(msg)
+
+    # --- Poblar PartidoEstadisticas ---
+    with Session(engine) as session:
+        stats_fetched = _populate_stats(session)
 
     summary = {
-        'total_fetched': len(fixtures),
+        'total_fetched': total_fetched,
         'created': created,
         'updated': updated,
         'stats_fetched': stats_fetched,

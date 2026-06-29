@@ -202,6 +202,69 @@ class APIFootballClient:
 
         return fixtures
 
+    def get_competition_fixtures(self, code: str, season: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Obtiene fixtures para una competición específica de football-data.org.
+
+        code: código de competición (PL, PD, SA, BL1, FL1, CL, WC, etc.)
+        season: año de temporada (ej. 2025 para 2025/2026). Opcional.
+        """
+        if self.mock:
+            return []
+
+        url = f"{self.base_url}/competitions/{code}/matches"
+        params = {}
+        if season is not None:
+            params["season"] = str(season)
+        data = self._safe_get(url, params=params)
+
+        fixtures = []
+        if not data or 'matches' not in data:
+            logger.warning("Empty/invalid response from football-data for %s season=%s", code, season)
+            return fixtures
+
+        for match in data.get('matches', []):
+            fixture_id = match.get('id')
+            date = match.get('utcDate')
+            status_api = match.get('status')
+            home_team = None
+            away_team = None
+            try:
+                home_team = match.get('homeTeam', {}).get('name')
+                away_team = match.get('awayTeam', {}).get('name')
+            except Exception:
+                pass
+
+            full_time = match.get('score', {}).get('fullTime', {}) or {}
+            goals_home = full_time.get('home')
+            goals_away = full_time.get('away')
+            half_time = match.get('score', {}).get('halfTime', {}) or {}
+
+            competition_name = None
+            try:
+                competition_name = match.get('competition', {}).get('name')
+            except Exception:
+                pass
+
+            fixtures.append({
+                'fixture_id': fixture_id,
+                'date': date,
+                'home_team': home_team,
+                'away_team': away_team,
+                'goals_home': goals_home,
+                'goals_away': goals_away,
+                'ht_goals_home': half_time.get('home'),
+                'ht_goals_away': half_time.get('away'),
+                'stage': match.get('stage'),
+                'group': match.get('group'),
+                'home_crest_url': match.get('homeTeam', {}).get('crest'),
+                'away_crest_url': match.get('awayTeam', {}).get('crest'),
+                'tournament': competition_name,
+                'status': status_api,
+                'competition_code': code,
+            })
+
+        return fixtures
+
     def get_match_metrics(self, fixture_id: int) -> Dict[str, Any]:
         """Devuelve métricas de remates para el fixture indicado.
 

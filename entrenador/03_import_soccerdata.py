@@ -9,6 +9,7 @@ from .config import settings, LEAGUES_REGISTRY
 from .database import get_engine, init_db
 from .models import Partido, PartidoEstadisticas, EquipoElo, Torneo, SourceCoverage
 from .sources.fbref import FBrefClient
+from .sources.understat import UnderstatClient
 from .sources.clubelo import ClubEloClient
 
 logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL))
@@ -104,6 +105,94 @@ def import_fbref_stats() -> int:
     return total
 
 
+def import_understat() -> int:
+    if not settings.SOCCERDATA_UNDERSTAT:
+        logger.info("Understat deshabilitado en config")
+        return 0
+
+    client = UnderstatClient()
+    engine = get_engine()
+    init_db()
+    total = 0
+
+    with Session(engine) as session:
+        for league_config in LEAGUES_REGISTRY:
+            torneo = session.exec(
+                select(Torneo).where(Torneo.nombre_canonico == league_config.nombre_canonico)
+            ).first()
+            coverage_torneo_id = torneo.id if torneo else None
+
+            understat_name = league_config.nombre_understat
+            if not understat_name:
+                continue
+            for season in (league_config.understat_seasons or []):
+                logger.info("Obteniendo Understat: %s %s", understat_name, season)
+                stats = client.get_match_stats(understat_name, season)
+                if not stats:
+                    continue
+
+                updated = 0
+                for stat in stats:
+                    hash_dedupe = stat.get("hash_dedupe")
+                    if not hash_dedupe:
+                        continue
+
+                    partido = session.exec(
+                        select(Partido).where(Partido.hash_dedupe == hash_dedupe)
+                    ).first()
+                    if not partido:
+                        continue
+
+                    existing_stats = session.exec(
+                        select(PartidoEstadisticas).where(
+                            PartidoEstadisticas.partido_id == partido.id,
+                            PartidoEstadisticas.fuente == "understat",
+                        )
+                    ).first()
+
+                    if existing_stats:
+                        for key, value in stat.items():
+                            if key in ("hash_dedupe", "fuente") or value is None:
+                                continue
+                            setattr(existing_stats, key, value)
+                        existing_stats.updated_at = datetime.now(timezone.utc)
+                    else:
+                        pe = PartidoEstadisticas(
+                            partido_id=partido.id,
+                            fuente="understat",
+                            **{k: v for k, v in stat.items() if k not in ("hash_dedupe", "fuente") and v is not None},
+                        )
+                        session.add(pe)
+
+                    updated += 1
+
+                session.commit()
+                total += updated
+                logger.info("  → %d partidos enriquecidos con Understat (%s %s)", updated,
+                            understat_name, season)
+
+                coverage = session.exec(
+                    select(SourceCoverage).where(
+                        SourceCoverage.fuente == "understat",
+                        SourceCoverage.torneo_id == coverage_torneo_id,
+                        SourceCoverage.temporada == season,
+                    )
+                ).first()
+                if coverage:
+                    coverage.partidos_con_stats = updated
+                    coverage.ultima_sync = datetime.now(timezone.utc)
+                else:
+                    session.add(SourceCoverage(
+                        fuente="understat", torneo_id=coverage_torneo_id,
+                        temporada=season, total_partidos=updated,
+                        partidos_con_stats=updated, ultima_sync=datetime.now(timezone.utc),
+                    ))
+                session.commit()
+
+    logger.info("Understat completado: %d partidos enriquecidos", total)
+    return total
+
+
 def import_clubelo() -> int:
     if not settings.SOCCERDATA_CLUBELO:
         logger.info("ClubElo deshabilitado en config")
@@ -156,6 +245,7 @@ def import_clubelo() -> int:
 
 def main():
     import_fbref_stats()
+    import_understat()
     import_clubelo()
     logger.info("✅ 03_import_soccerdata completado")
 
