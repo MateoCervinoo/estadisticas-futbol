@@ -18,6 +18,7 @@ from .api_client import APIFootballClient
 from .models import Partido, PartidoEstadisticas
 from .database import engine, init_db, ensure_partido_columns
 from .data_mapper import normalize_status, normalize_tournament
+from hashlib import md5
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -125,6 +126,11 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             except Exception:
                 torneo_id = None
 
+            # Generar hash_dedupe para cross-source dedup
+            date_str = date.strftime("%Y-%m-%d") if date else ""
+            hash_key = f"{date_str}|{(home_team or '').lower().strip()}|{(away_team or '').lower().strip()}|{tournament.lower().strip()}"
+            hash_dedupe = md5(hash_key.encode("utf-8")).hexdigest()
+
             # Mapear nombres de la API a IDs de Equipo si existe la tabla
             home_team_id = None
             away_team_id = None
@@ -140,14 +146,20 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                 home_team_id = None
                 away_team_id = None
 
+            # Buscar por fixture_id o por hash_dedupe (cross-source dedup)
             stmt = select(Partido).where(Partido.fixture_id == fixture_id)
             existing = session.exec(stmt).first()
+            if not existing and hash_dedupe:
+                existing = session.exec(
+                    select(Partido).where(Partido.hash_dedupe == hash_dedupe)
+                ).first()
 
             try:
                 if not existing:
                     # Crear nuevo registro
                     partido = Partido(
                         fixture_id=fixture_id,
+                        hash_dedupe=hash_dedupe,
                         fuente_origen="api_football_data",
                         torneo_id=torneo_id,
                         fecha_utc=date or datetime.now(timezone.utc),

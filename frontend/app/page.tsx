@@ -115,10 +115,16 @@ export default function Home() {
     setLoading(true)
     getPartidos(selectedYear)
       .then((data) => {
-        if (mounted) setPartidos(data)
+        if (mounted) {
+          setPartidos(data)
+          setInitialLoad(false)
+        }
       })
       .catch((err) => {
-        if (mounted) setError(String(err))
+        if (mounted) {
+          setError(String(err))
+          setInitialLoad(false)
+        }
       })
       .finally(() => {
         if (mounted) setLoading(false)
@@ -279,6 +285,7 @@ export default function Home() {
   const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
   const [statsLoading, setStatsLoading] = useState<boolean>(false)
   const [fechaLoaded, setFechaLoaded] = useState<boolean>(false)
+  const [initialLoad, setInitialLoad] = useState<boolean>(true)
 
   const allMatches = partidos ?? []
   const competitionOptions = useMemo(
@@ -531,8 +538,22 @@ export default function Home() {
 
           {!loading && filteredMatches.length === 0 && (
             <div className="text-center py-5">
-              <div className="text-muted fs-5 mb-2">No hay partidos</div>
-              <div className="small text-muted">Probá cambiando los filtros o seleccionando otro año</div>
+              {initialLoad ? (
+                <>
+                  <div className="text-muted fs-5 mb-2">Cargando partidos...</div>
+                  <div className="small text-muted">Obteniendo datos del servidor</div>
+                </>
+              ) : (!partidos || partidos.length === 0) ? (
+                <>
+                  <div className="text-muted fs-5 mb-2">No hay partidos disponibles</div>
+                  <div className="small text-muted">Revisá que el CSV histórico y la API estén sincronizados</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-muted fs-5 mb-2">No hay partidos con estos filtros</div>
+                  <div className="small text-muted">Probá cambiando los filtros</div>
+                </>
+              )}
             </div>
           )}
 
