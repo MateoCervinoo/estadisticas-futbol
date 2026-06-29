@@ -50,7 +50,8 @@ def import_results_csv(csv_path: str = None) -> int:
     # Filtrar partidos del Mundial 2026 (los trae la API con datos estructurados)
     if has_tournament:
         before = len(df)
-        df = df[~((df["tournament"] == "FIFA World Cup") & (df["date"] >= MUNDIAL_2026_START))].copy()
+        world_cup_mask = df["tournament"].str.lower().str.contains("world cup", na=False) | df["tournament"].str.lower().str.contains("mundial", na=False)
+        df = df[~(world_cup_mask & (df["date"] >= MUNDIAL_2026_START))].copy()
         filtrados = before - len(df)
         if filtrados:
             logger.info("Partidos del Mundial 2026 filtrados (van por API): %d", filtrados)

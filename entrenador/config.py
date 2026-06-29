@@ -105,9 +105,11 @@ LEAGUES_REGISTRY: List[LeagueConfig] = [
                  football_data_league_code="SA"),
     LeagueConfig("Bundesliga", "GER-Bundesliga", "BL1", "Bundesliga", tipo="liga", categoria="club", pais="DE", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
+                 understat_seasons=["2020", "2021", "2022", "2023", "2024"],
                  football_data_league_code="BL1"),
     LeagueConfig("Ligue 1", "FRA-Ligue 1", "FL1", "Ligue_1", tipo="liga", categoria="club", pais="FR", nivel=1,
                  fbref_seasons=["2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"],
+                 understat_seasons=["2020", "2021", "2022", "2023", "2024"],
                  football_data_league_code="FL1"),
     LeagueConfig("Champions League", None, "CL", "UCL", tipo="copa", categoria="club", nivel=1,
                  fbref_seasons=[], understat_seasons=[],  # FBref no tiene Champions League como liga standalone

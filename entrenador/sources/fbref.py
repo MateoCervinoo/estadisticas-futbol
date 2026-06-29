@@ -1,11 +1,20 @@
 from __future__ import annotations
 import logging
+import signal
 from typing import Dict, List, Optional, Set
 from datetime import datetime
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class TimeoutError(Exception):
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise TimeoutError("FBref operation timed out")
 
 
 class FBrefClient:
@@ -30,6 +39,19 @@ class FBrefClient:
             "Gold Cup": "CONCACAF Gold Cup",
         }
         return intl_leagues.get(league, league)
+
+    def _with_timeout(self, func, timeout=45):
+        if not hasattr(signal, "SIGALRM"):
+            return func()
+        old = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout)
+        try:
+            result = func()
+            signal.alarm(0)
+            return result
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
 
     def get_available_hashes(self, league: str, season: str) -> Set[str]:
         if not self._available:
@@ -63,7 +85,7 @@ class FBrefClient:
         if not self._available:
             return []
 
-        try:
+        def _fetch():
             from soccerdata.fbref import FBref
             from ..utils.dedupe import generate_match_hash
 
@@ -74,17 +96,37 @@ class FBrefClient:
             if matches is None or matches.empty:
                 return []
 
-            shooting = fbref.read_shooting()
-            passing = fbref.read_passing()
-            possession = fbref.read_possession()
-            misc = fbref.read_misc()
+            teams_df = fbref.read_team_season_stats()
+            if teams_df is None or teams_df.empty:
+                return []
+
+            team_names = list(teams_df.index.get_level_values("team").unique())
+
+            team_lookup = {}
+            for team in team_names:
+                for st in ("shooting", "misc"):
+                    try:
+                        df = fbref.read_team_match_stats(stat_type=st, team=team)
+                        if df is not None and not df.empty:
+                            team_lookup.setdefault(team, {})[st] = df
+                    except Exception as e:
+                        logger.debug("FBref %s %s %s: %s", league, st, team, e)
+
+            if not team_lookup:
+                return []
+
+            def _find_row(df, opponent, venue):
+                for _, r in df.iterrows():
+                    if r.get(("opponent", ""), "") == opponent and r.get(("venue", ""), "") == venue:
+                        return r
+                return None
 
             results = []
-            for idx, row in matches.iterrows():
+            for _, row in matches.iterrows():
                 home = row.get("home_team") or ""
                 away = row.get("away_team") or ""
                 date_val = row.get("date")
-                if date_val is None or not home or not away:
+                if not home or not away or date_val is None:
                     continue
                 date_str = str(date_val.date()) if hasattr(date_val, "date") else str(date_val)[:10]
                 comp = row.get("league") or league
@@ -92,39 +134,33 @@ class FBrefClient:
 
                 home_stats = {}
                 away_stats = {}
-                if shooting is not None and idx in shooting.index:
-                    try:
-                        s = shooting.loc[idx]
-                        home_stats["xg"] = _safe_float(s.get(("xg", home), None))
-                        away_stats["xg"] = _safe_float(s.get(("xg", away), None))
-                        home_stats["shots"] = _safe_int(s.get(("shots_total", home), None))
-                        away_stats["shots"] = _safe_int(s.get(("shots_total", away), None))
-                        home_stats["shots_on_target"] = _safe_int(s.get(("shots_on_target", home), None))
-                        away_stats["shots_on_target"] = _safe_int(s.get(("shots_on_target", away), None))
-                    except Exception:
-                        pass
 
-                if possession is not None and idx in possession.index:
-                    try:
-                        p = possession.loc[idx]
-                        home_stats["possession"] = _safe_float(p.get(("possession", home), None))
-                        away_stats["possession"] = _safe_float(p.get(("possession", away), None))
-                    except Exception:
-                        pass
+                hd = team_lookup.get(home, {})
+                ad = team_lookup.get(away, {})
 
-                if misc is not None and idx in misc.index:
-                    try:
-                        m = misc.loc[idx]
-                        home_stats["corners"] = _safe_int(m.get(("corner_kicks", home), None))
-                        away_stats["corners"] = _safe_int(m.get(("corner_kicks", away), None))
-                        home_stats["fouls"] = _safe_int(m.get(("fouls", home), None))
-                        away_stats["fouls"] = _safe_int(m.get(("fouls", away), None))
-                        home_stats["yellow"] = _safe_int(m.get(("yellow_cards", home), None))
-                        away_stats["yellow"] = _safe_int(m.get(("yellow_cards", away), None))
-                        home_stats["red"] = _safe_int(m.get(("red_cards", home), None))
-                        away_stats["red"] = _safe_int(m.get(("red_cards", away), None))
-                    except Exception:
-                        pass
+                h_row = _find_row(hd.get("shooting"), away, "Home")
+                a_row = _find_row(ad.get("shooting"), home, "Away")
+                if h_row is not None:
+                    home_stats["xg"] = _safe_float(h_row.get(("Standard", "xG")) or h_row.get(("Expected", "xG")))
+                    home_stats["shots"] = _safe_int(h_row.get(("Standard", "Sh")))
+                    home_stats["shots_on_target"] = _safe_int(h_row.get(("Standard", "SoT")))
+                if a_row is not None:
+                    away_stats["xg"] = _safe_float(a_row.get(("Standard", "xG")) or a_row.get(("Expected", "xG")))
+                    away_stats["shots"] = _safe_int(a_row.get(("Standard", "Sh")))
+                    away_stats["shots_on_target"] = _safe_int(a_row.get(("Standard", "SoT")))
+
+                h_misc = _find_row(hd.get("misc"), away, "Home")
+                a_misc = _find_row(ad.get("misc"), home, "Away")
+                if h_misc is not None:
+                    home_stats["corners"] = _safe_int(h_misc.get(("Misc", "Crs")))
+                    home_stats["fouls"] = _safe_int(h_misc.get(("Misc", "Fls")))
+                    home_stats["yellow"] = _safe_int(h_misc.get(("Misc", "CrdY")))
+                    home_stats["red"] = _safe_int(h_misc.get(("Misc", "CrdR")))
+                if a_misc is not None:
+                    away_stats["corners"] = _safe_int(a_misc.get(("Misc", "Crs")))
+                    away_stats["fouls"] = _safe_int(a_misc.get(("Misc", "Fls")))
+                    away_stats["yellow"] = _safe_int(a_misc.get(("Misc", "CrdY")))
+                    away_stats["red"] = _safe_int(a_misc.get(("Misc", "CrdR")))
 
                 results.append({
                     "hash_dedupe": hash_dedupe,
@@ -135,8 +171,8 @@ class FBrefClient:
                     "remates_visitante": away_stats.get("shots"),
                     "remates_puerta_local": home_stats.get("shots_on_target"),
                     "remates_puerta_visitante": away_stats.get("shots_on_target"),
-                    "posesion_local": home_stats.get("possession"),
-                    "posesion_visitante": away_stats.get("possession"),
+                    "posesion_local": None,
+                    "posesion_visitante": None,
                     "corners_local": home_stats.get("corners"),
                     "corners_visitante": away_stats.get("corners"),
                     "faltas_local": home_stats.get("fouls"),
@@ -148,6 +184,11 @@ class FBrefClient:
                 })
             return results
 
+        try:
+            return self._with_timeout(_fetch, timeout=180)
+        except TimeoutError:
+            logger.warning("FBref timeout para %s %s", league, season)
+            return []
         except Exception as e:
             logger.error("Error obteniendo stats FBref: %s", e)
             return []
