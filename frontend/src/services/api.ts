@@ -240,3 +240,56 @@ export async function getComparacion(eq1: number, eq2: number): Promise<Comparac
     return safeJson(res)
   } catch { return null }
 }
+
+// ──────────── FASE 6 — Live + Notifications ────────────
+
+export interface NotificacionItem {
+  id: number
+  partido_id: number
+  tipo: string
+  mensaje: string
+  leida: boolean
+  created_at: string | null
+}
+
+export async function getNotificaciones(noLeidas?: boolean): Promise<NotificacionItem[]> {
+  try {
+    const params = noLeidas ? '?no_leidas=true' : ''
+    const res = await fetch(`${BASE_URL}/notificaciones${params}`)
+    if (!res.ok) return []
+    return safeJson(res)
+  } catch { return [] }
+}
+
+export async function getNotificacionesNoLeidasCount(): Promise<number> {
+  try {
+    const res = await fetch(`${BASE_URL}/notificaciones/no-leidas`)
+    if (!res.ok) return 0
+    const data = await safeJson(res)
+    return data.count ?? 0
+  } catch { return 0 }
+}
+
+export async function marcarNotificacionLeida(id: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE_URL}/notificaciones/${id}/leer`, { method: 'POST' })
+    return res.ok
+  } catch { return false }
+}
+
+export async function marcarTodasLeidas(): Promise<number> {
+  try {
+    const res = await fetch(`${BASE_URL}/notificaciones/leer-todas`, { method: 'POST' })
+    if (!res.ok) return 0
+    const data = await safeJson(res)
+    return data.marcadas ?? 0
+  } catch { return 0 }
+}
+
+export async function getPartidosEnVivo(): Promise<Partido[]> {
+  try {
+    const res = await fetch(`${BASE_URL}/partidos/live`)
+    if (!res.ok) return []
+    return safeJson(res)
+  } catch { return [] }
+}

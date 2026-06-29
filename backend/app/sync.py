@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional
 from sqlmodel import Session, select
 
 from .api_client import APIFootballClient
-from .models import Partido, PartidoEstadisticas
+from .models import Partido, PartidoEstadisticas, Notificacion
 from .database import engine, init_db, ensure_partido_columns
 from .data_mapper import normalize_status, normalize_tournament
 from hashlib import md5
@@ -227,9 +227,10 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 logger.debug("Partido %s final en DB y dentro de ventana de 2h; saltando actualización", fixture_id)
                 return
 
+            old_status = existing.estado
             if (
-                (existing.estado in ('NS', 'TIMED') and api_final)
-                or (existing.estado != status)
+                (old_status in ('NS', 'TIMED') and api_final)
+                or (old_status != status)
                 or score_changed
                 or metadata_changed
                 or (local_final and allow_update_after_final_hours and status in FINAL_STATUSES)
@@ -255,6 +256,23 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                     home_xg, away_xg = _compute_xg_from_metrics(metrics)
                     existing.xg_local = home_xg
                     existing.xg_visitante = away_xg
+
+                # Create notification on status transition
+                transition_type = None
+                if old_status in ('NS', 'TIMED') and status == 'IN_PLAY':
+                    transition_type = 'inicio'
+                    msg = f"{home_team or '?'} vs {away_team or '?'} empezó"
+                elif old_status == 'IN_PLAY' and status in ('FT', 'AET', 'PEN'):
+                    transition_type = 'fin'
+                    score = f"{goals_home or 0}-{goals_away or 0}"
+                    msg = f"{home_team or '?'} {score} {away_team or '?'} terminó"
+                if transition_type and existing.id:
+                    notif = Notificacion(
+                        partido_id=existing.id,
+                        tipo=transition_type,
+                        mensaje=msg,
+                    )
+                    session.add(notif)
 
                 session.add(existing)
                 session.commit()

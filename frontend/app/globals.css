@@ -42,3 +42,16 @@ body {
 .modal .table th {
   min-width: 3.25rem;
 }
+
+.hover-bg-light:hover {
+  background-color: #f8f9fa;
+}
+
+.live-pulse {
+  animation: pulse-animation 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-animation {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

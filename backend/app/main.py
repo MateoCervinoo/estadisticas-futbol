@@ -2,13 +2,14 @@
 from typing import List, Optional
 
 import logging
-from fastapi import FastAPI, HTTPException
+import asyncio
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
 from sqlalchemy import or_, and_
 
 from .database import engine, ensure_partido_columns
-from .models import Partido, Equipo, PartidoEstadisticas
+from .models import Partido, Equipo, PartidoEstadisticas, Notificacion
 from .dixoncoles import predict_match, predict_exact_score_matrix, load_model_json, select_model_for_match
 from .sync import sync_fixtures_and_metrics
 import pandas as pd
@@ -20,6 +21,55 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# ──────────── WebSocket Connection Manager ────────────
+
+class ConnectionManager:
+    def __init__(self):
+        self.active: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active:
+            self.active.remove(ws)
+
+    async def broadcast(self, data: dict):
+        for ws in self.active[:]:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                self.disconnect(ws)
+
+manager = ConnectionManager()
+last_broadcasted_id = 0
+
+async def broadcast_new_notifications():
+    global last_broadcasted_id
+    while True:
+        try:
+            def query():
+                with Session(engine) as session:
+                    stmt = select(Notificacion).where(Notificacion.id > last_broadcasted_id).order_by(Notificacion.id)
+                    return session.exec(stmt).all()
+            notifs = await asyncio.to_thread(query)
+            for n in notifs:
+                await manager.broadcast({
+                    "type": "notification",
+                    "data": {
+                        "id": n.id,
+                        "partido_id": n.partido_id,
+                        "tipo": n.tipo,
+                        "mensaje": n.mensaje,
+                        "created_at": n.created_at.isoformat() if n.created_at else None,
+                    }
+                })
+                last_broadcasted_id = n.id
+        except Exception:
+            pass
+        await asyncio.sleep(5)
 
 
 app = FastAPI(title="Estadisticas Futbol - Backend")
@@ -34,6 +84,14 @@ def on_startup():
         logger.info("Tablas creadas/confirmadas en la base de datos")
     except Exception:
         logger.exception("Fallo creando tablas en la base de datos al startup. Continuando...")
+
+    # Background task for broadcasting notifications via WebSocket
+    try:
+        loop = asyncio.get_event_loop()
+        loop.create_task(broadcast_new_notifications())
+        logger.info("Background notification broadcaster started")
+    except Exception:
+        logger.exception("No se pudo iniciar el broadcaster de notificaciones")
 
     # Ejecutar sincronización inicial, pero no provocar crash si falla
     try:
@@ -435,6 +493,88 @@ def debug_datos_corruptos():
     except Exception:
         logger.exception("Error leyendo %s", chosen)
         raise HTTPException(status_code=500, detail="No se pudo leer el archivo de registros corruptos")
+
+
+# ──────────────────────────────────────────────
+# FASE 6 — Live Alerts + Notifications
+# ──────────────────────────────────────────────
+
+@app.websocket("/ws/matches")
+async def ws_matches(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
+
+
+@app.get("/api/notificaciones")
+def api_notificaciones(no_leidas: bool = False):
+    """Lista de notificaciones. Pasá no_leidas=true para solo las no leídas."""
+    with Session(engine) as session:
+        stmt = select(Notificacion).order_by(Notificacion.id.desc()).limit(50)
+        if no_leidas:
+            stmt = stmt.where(Notificacion.leida == False)
+        notifs = session.exec(stmt).all()
+        return [
+            {
+                "id": n.id,
+                "partido_id": n.partido_id,
+                "tipo": n.tipo,
+                "mensaje": n.mensaje,
+                "leida": n.leida,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in notifs
+        ]
+
+
+@app.get("/api/notificaciones/no-leidas")
+def api_notificaciones_no_leidas_count():
+    """Cantidad de notificaciones no leídas."""
+    with Session(engine) as session:
+        count = session.exec(
+            select(Notificacion).where(Notificacion.leida == False)
+        ).all()
+        return {"count": len(count)}
+
+
+@app.post("/api/notificaciones/{notif_id}/leer")
+def api_notificacion_leer(notif_id: int):
+    """Marca una notificación como leída."""
+    with Session(engine) as session:
+        n = session.get(Notificacion, notif_id)
+        if not n:
+            raise HTTPException(404, "Notificación no encontrada")
+        n.leida = True
+        session.add(n)
+        session.commit()
+        return {"ok": True}
+
+
+@app.post("/api/notificaciones/leer-todas")
+def api_notificaciones_leer_todas():
+    """Marca todas las notificaciones como leídas."""
+    with Session(engine) as session:
+        notifs = session.exec(select(Notificacion).where(Notificacion.leida == False)).all()
+        for n in notifs:
+            n.leida = True
+            session.add(n)
+        session.commit()
+        return {"ok": True, "marcadas": len(notifs)}
+
+
+@app.get("/api/partidos/live")
+def api_partidos_live():
+    """Devuelve partidos actualmente en vivo (estado IN_PLAY)."""
+    with Session(engine) as session:
+        partidos = session.exec(
+            select(Partido).where(Partido.estado == "IN_PLAY")
+        ).all()
+        return [_enrich_partido_item(p, session) for p in partidos]
 
 
 # ──────────────────────────────────────────────

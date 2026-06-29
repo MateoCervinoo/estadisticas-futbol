@@ -140,6 +140,40 @@ export default function Home() {
     return () => window.clearInterval(timer)
   }, [])
 
+  // WebSocket connection to re-fetch on live notifications
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/matches'
+
+  useEffect(() => {
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout>
+
+    const connect = () => {
+      ws = new WebSocket(WS_URL)
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type === 'notification') {
+            getPartidos(selectedYear).then((data) => {
+              if (data) setPartidos(data)
+            }).catch(() => {})
+          }
+        } catch {}
+      }
+      ws.onclose = () => {
+        reconnectTimer = setTimeout(connect, 5000)
+      }
+      ws.onerror = () => {
+        ws?.close()
+      }
+    }
+
+    connect()
+    return () => {
+      ws?.close()
+      clearTimeout(reconnectTimer)
+    }
+  }, [selectedYear])
+
   const formatScore = (s: number | null) => (s === null || s === undefined ? '-' : String(s))
   const parseMatchDate = (iso: string) => {
     const value = String(iso ?? '').trim()
@@ -565,7 +599,12 @@ export default function Home() {
                 <div key={p.id} className="col-12 col-md-6 mb-3">
                   <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
                     <div className="d-flex justify-content-between align-items-start gap-3">
-                      <div className="small text-muted">{tournamentOf(p)}{stageOf(p) ? ` · ${stageOf(p)}` : ''}{p.group ? ` · ${groupOf(p)}` : ''}</div>
+                      <div className="small text-muted d-flex align-items-center gap-2">
+                        {tournamentOf(p)}{stageOf(p) ? ` · ${stageOf(p)}` : ''}{p.group ? ` · ${groupOf(p)}` : ''}
+                        {p.status === 'IN_PLAY' && (
+                          <span className="badge bg-danger rounded-pill live-pulse small">EN VIVO</span>
+                        )}
+                      </div>
                       <div className="small text-muted text-end">{formatDate(p.date)}</div>
                     </div>
 
@@ -810,6 +849,7 @@ export default function Home() {
           </>
         )}
       </div>
+
     </main>
   )
 }
