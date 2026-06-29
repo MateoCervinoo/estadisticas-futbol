@@ -6,6 +6,10 @@ from decimal import Decimal
 from sqlmodel import SQLModel, Field, Column, JSON, BigInteger, SmallInteger, UniqueConstraint, Index
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class Equipo(SQLModel, table=True):
     __tablename__ = "equipo"
 
@@ -17,7 +21,7 @@ class Equipo(SQLModel, table=True):
     nombre_fbref: Optional[str] = None
     nombre_understat: Optional[str] = None
     codigo_iso: Optional[str] = Field(default=None, max_length=3)
-    codigo_bandera: Optional[str] = Field(default=None, max_length=2)
+    codigo_bandera: Optional[str] = Field(default=None, max_length=10)
     tipo: str = Field(default="seleccion", max_length=20)
     activo: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -259,10 +263,90 @@ class SyncLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     fuente: str = Field(max_length=30)
     tipo: str = Field(max_length=20)
-    fecha_inicio: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    fecha_inicio: datetime = Field(default_factory=utc_now)
     fecha_fin: Optional[datetime] = None
     partidos_procesados: int = 0
     partidos_nuevos: int = 0
     partidos_actualizados: int = 0
     errores: int = 0
     estado: str = Field(default="running", max_length=20)
+
+
+class ModelVersion(SQLModel, table=True):
+    __tablename__ = "model_version"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    version: str = Field(max_length=20, unique=True, index=True)
+    model_type: str = Field(max_length=30)
+    features_version: str = Field(max_length=10)
+    data_cutoff: datetime
+    train_size: int
+    metrics: dict = Field(default={}, sa_type=JSON)
+    params_json: dict = Field(default={}, sa_type=JSON)
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class TorneoTablaPosicion(SQLModel, table=True):
+    __tablename__ = "torneo_tabla_posicion"
+
+    torneo_id: int = Field(foreign_key="torneo.id", primary_key=True)
+    equipo_id: int = Field(foreign_key="equipo.id", primary_key=True)
+    pj: int = 0
+    pg: int = 0
+    pe: int = 0
+    pp: int = 0
+    gf: int = 0
+    gc: int = 0
+    pts: int = 0
+    xg_favor: float = 0
+    xg_contra: float = 0
+    forma_5: str = Field(default="", max_length=10)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class TorneoBracket(SQLModel, table=True):
+    __tablename__ = "torneo_bracket"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    torneo_id: int = Field(foreign_key="torneo.id", index=True)
+    ronda: str = Field(max_length=30, index=True)
+    orden: int = Field(index=True)
+    partido_id: Optional[int] = Field(default=None, foreign_key="partido.id")
+    equipo1_id: Optional[int] = Field(default=None, foreign_key="equipo.id")
+    equipo2_id: Optional[int] = Field(default=None, foreign_key="equipo.id")
+    ganador_id: Optional[int] = Field(default=None, foreign_key="equipo.id")
+
+
+class PartidoEvento(SQLModel, table=True):
+    __tablename__ = "partido_evento"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    partido_id: int = Field(foreign_key="partido.id", index=True)
+    minuto: int = Field(index=True)
+    tipo: str = Field(max_length=20, index=True)
+    equipo_id: int = Field(foreign_key="equipo.id")
+    jugador: Optional[str] = Field(default=None, max_length=100)
+    detalle: Optional[str] = Field(default=None, max_length=100)
+
+
+class UsuarioFavorito(SQLModel, table=True):
+    __tablename__ = "usuario_favorito"
+
+    usuario_id: str = Field(max_length=64, primary_key=True)
+    partido_id: int = Field(foreign_key="partido.id", primary_key=True)
+    alerta_gol: bool = True
+    alerta_inicio: bool = True
+    alerta_fin: bool = True
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ValueBet(SQLModel, table=True):
+    __tablename__ = "value_bet"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    partido_id: int = Field(foreign_key="partido.id", index=True)
+    mercado: str = Field(max_length=20, index=True)
+    prob_modelo: float
+    cuota_mercado: float
+    value: float
+    detectado_at: datetime = Field(default_factory=utc_now, index=True)
