@@ -340,6 +340,17 @@ class UsuarioFavorito(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class Notificacion(SQLModel, table=True):
+    __tablename__ = "notificacion"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    partido_id: int = Field(foreign_key="partido.id", index=True)
+    tipo: str = Field(max_length=20, index=True)
+    mensaje: str = Field(max_length=255)
+    leida: bool = False
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class ValueBet(SQLModel, table=True):
     __tablename__ = "value_bet"
 

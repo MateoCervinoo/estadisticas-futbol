@@ -1,5 +1,6 @@
 import './globals.css'
 import Link from 'next/link'
+import NotificationBell from '../components/NotificationBell'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -24,9 +25,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="navbar-toggler-icon" />
             </button>
             <div className="collapse navbar-collapse" id="mainNav">
-              <ul className="navbar-nav ms-auto">
+              <ul className="navbar-nav ms-auto align-items-center">
                 <li className="nav-item"><Link href="/" className="nav-link">Calendario</Link></li>
                 <li className="nav-item"><Link href="/torneos" className="nav-link">Torneos</Link></li>
+                <li className="nav-item ms-2">
+                  <NotificationBell />
+                </li>
               </ul>
             </div>
           </div>
