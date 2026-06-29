@@ -111,3 +111,132 @@ export async function getPartidoEstadisticas(partidoId: number): Promise<Partido
     return null
   }
 }
+
+// ──────────── FASE 5 ────────────
+
+export interface Torneo {
+  id: number
+  nombre_canonico: string
+  tipo: string
+  categoria: string
+  nivel: number | null
+  total_partidos: number
+}
+
+export interface TablaRow {
+  equipo_id: number
+  equipo: string
+  codigo_bandera: string | null
+  pj: number
+  pg: number
+  pe: number
+  pp: number
+  gf: number
+  gc: number
+  gd: number
+  pts: number
+  xg_favor: number
+  xg_contra: number
+  xg_diff: number
+}
+
+export interface BracketMatch {
+  partido_id: number
+  home_team: string
+  away_team: string
+  home_score: number | null
+  away_score: number | null
+  estado: string
+  fecha: string | null
+  grupo: string | null
+}
+
+export interface BracketRound {
+  stage: string
+  label: string
+  order: number
+  matches: BracketMatch[]
+}
+
+export interface FormaEntry {
+  partido_id: number
+  resultado: string
+  goles_favor: number
+  goles_contra: number
+  rival: string
+  fecha: string | null
+}
+
+export interface EquipoPerfil {
+  equipo_id: number
+  nombre: string
+  codigo_bandera: string | null
+  forma: FormaEntry[]
+  proximos: {
+    partido_id: number
+    fixture_id: number | null
+    local: boolean
+    rival: string
+    fecha: string | null
+    torneo_id: number | null
+    home_team: string | null
+    away_team: string | null
+  }[]
+  stats: {
+    pj: number; pg: number; pe: number; pp: number
+    gf: number; gc: number; gd: number; pts: number
+  }
+}
+
+export interface ComparacionStats {
+  pj: number; pg: number; pe: number; pp: number
+  gf: number; gc: number; gd: number; pts: number
+  xg_favor: number; xg_contra: number
+}
+
+export interface Comparacion {
+  equipo1: { id: number; nombre: string; codigo_bandera: string | null; stats: ComparacionStats }
+  equipo2: { id: number; nombre: string; codigo_bandera: string | null; stats: ComparacionStats }
+  h2h: {
+    eq1_wins: number; eq2_wins: number; draws: number
+    matches: { eq1_goals: number; eq2_goals: number; fecha: string | null }[]
+  }
+}
+
+export async function getTorneos(): Promise<Torneo[]> {
+  const res = await fetch(`${BASE_URL}/torneos`)
+  if (!res.ok) return []
+  return safeJson(res)
+}
+
+export async function getTablaPosiciones(torneoId: number): Promise<{ torneo: string; tipo: string; tabla: TablaRow[] } | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/torneos/${torneoId}/tabla-posiciones`)
+    if (!res.ok) return null
+    return safeJson(res)
+  } catch { return null }
+}
+
+export async function getBracket(torneoId: number): Promise<{ torneo: string; bracket: BracketRound[] } | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/torneos/${torneoId}/bracket`)
+    if (!res.ok) return null
+    return safeJson(res)
+  } catch { return null }
+}
+
+export async function getEquipoPerfil(equipoId: number): Promise<EquipoPerfil | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/equipos/${equipoId}/perfil`)
+    if (!res.ok) return null
+    return safeJson(res)
+  } catch { return null }
+}
+
+export async function getComparacion(eq1: number, eq2: number): Promise<Comparacion | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/equipos/comparar?eq1=${eq1}&eq2=${eq2}`)
+    if (!res.ok) return null
+    return safeJson(res)
+  } catch { return null }
+}
