@@ -9,7 +9,7 @@ from sqlalchemy import or_, and_
 
 from .database import engine, ensure_partido_columns
 from .models import Partido, Equipo, PartidoEstadisticas
-from .dixoncoles import predict_match, predict_exact_score_matrix
+from .dixoncoles import predict_match, predict_exact_score_matrix, load_model_json, select_model_for_match
 from .sync import sync_fixtures_and_metrics
 import pandas as pd
 import os
@@ -48,49 +48,55 @@ def on_startup():
         try:
             logger.info("Cargando parámetros Dixon-Coles desde JSON (si existe)...")
             try:
-                # Intentamos cargar y guardar en app.state.model; si no existe, dejamos neutrales
-                app.state.model = None
-                json_path = os.path.join('/', 'app', 'data', 'model_params.json')
-                alt_path = os.path.join(os.path.dirname(__file__), 'data', 'model_params.json')
-                model = None
-                if os.path.exists(json_path):
-                    with open(json_path, 'r') as fh:
-                        model = json.load(fh)
-                        # Diagnostic print requested
-                        print(f"🚨 EXITO: JSON cargado correctamente. Llaves principales: {list(model.keys())}")
-                        logger.info("Cargado modelo Dixon-Coles desde %s", json_path)
-                elif os.path.exists(alt_path):
-                    with open(alt_path, 'r') as fh:
-                        model = json.load(fh)
-                        # Diagnostic print requested
-                        print(f"🚨 EXITO: JSON cargado correctamente. Llaves principales: {list(model.keys())}")
-                        logger.info("Cargado modelo Dixon-Coles desde %s", alt_path)
+                data_dir = os.path.join('/', 'app', 'data')
+                alt_data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
-                if model is None:
-                    # Diagnostic: file not found in either location
-                    print("🚨 ERROR FATAL: El archivo model_params.json no existe en el contenedor. Usando valores 1.0 por defecto.")
-                    model = {
-                        'teams': [],
-                        'team_to_idx': {},
-                        'attack': [],
-                        'defense': [],
-                        'gamma': 1.0,
-                        'rho': 1.0,
+                def _resolve_path(filename):
+                    fp = os.path.join(data_dir, filename)
+                    if os.path.exists(fp):
+                        return fp
+                    fp = os.path.join(alt_data_dir, filename)
+                    if os.path.exists(fp):
+                        return fp
+                    return None
+
+                # Load selecciones model
+                sel_path = _resolve_path("model_params.json")
+                sel_model = load_model_json(sel_path) if sel_path else None
+                if sel_model:
+                    print(f"🚨 Modelo selecciones cargado. Llaves: {list(sel_model.keys())}")
+                    logger.info("Cargado modelo selecciones desde %s", sel_path)
+                else:
+                    print("🚨 No se encontró model_params.json para selecciones")
+                    sel_model = {
+                        'teams': [], 'team_to_idx': {},
+                        'attack': {}, 'defense': {},
+                        'gamma': 1.0, 'rho': 1.0,
                     }
 
-                app.state.model = model
+                # Load clubes model
+                club_path = _resolve_path("model_params_clubes.json")
+                club_model = load_model_json(club_path) if club_path else None
+                if club_model:
+                    print(f"🚨 Modelo clubes cargado. Llaves: {list(club_model.keys())}")
+                    logger.info("Cargado modelo clubes desde %s", club_path)
+                else:
+                    club_model = None
+                    logger.info("No se encontró modelo para clubes, se usará el de selecciones como fallback")
+
+                app.state.sel_model = sel_model
+                app.state.club_model = club_model
+                app.state.model = sel_model  # keep backwards compat
             except Exception:
-                # If an error occurred reading the JSON, inform via print and keep neutrals
-                print("🚨 ERROR FATAL: El archivo model_params.json no existe en el contenedor o no pudo leerse. Usando valores 1.0 por defecto.")
                 logger.exception("No se pudo cargar model_params.json; usando neutrales en memoria")
-                app.state.model = {
-                    'teams': [],
-                    'team_to_idx': {},
-                    'attack': [],
-                    'defense': [],
-                    'gamma': 1.0,
-                    'rho': 1.0,
+                fallback = {
+                    'teams': [], 'team_to_idx': {},
+                    'attack': {}, 'defense': {},
+                    'gamma': 1.0, 'rho': 1.0,
                 }
+                app.state.sel_model = fallback
+                app.state.club_model = None
+                app.state.model = fallback
 
             # Ejecutar sincronización de fixtures y métricas (dentro del mismo try para capturar errores)
             logger.info("Iniciando sincronización de fixtures y métricas...")
@@ -276,33 +282,18 @@ def partido_prediccion_alt(partido_id: int):
         # No bloquear; usaremos los nombres originales como fallback
         logger.exception("Error resolviendo Equipo para partido %s; usando nombres sin normalizar", partido.fixture_id)
 
-    # Local helper to load params safely at request time from /app/data/model_params.json
-    def get_params():
-        try:
-            model = getattr(app.state, 'model', None)
-            if model is not None:
-                return model
-            json_path = os.path.join('/', 'app', 'data', 'model_params.json')
-            alt_json = os.path.join(os.path.dirname(__file__), 'data', 'model_params.json')
-            if os.path.exists(json_path):
-                with open(json_path, 'r') as fh:
-                    return json.load(fh)
-            if os.path.exists(alt_json):
-                with open(alt_json, 'r') as fh:
-                    return json.load(fh)
-        except Exception:
-            logger.exception("Error leyendo model_params.json en get_params(); usando neutrales")
-
-        # Fallback neutrales (attack/defense como dicts)
-        return {
+    # Select model based on match category
+    sel_model = getattr(app.state, 'sel_model', None)
+    club_model = getattr(app.state, 'club_model', None)
+    model = select_model_for_match(partido_id, engine, sel_model, club_model)
+    if model is None:
+        model = {
             'teams': [],
             'attack': {},
             'defense': {},
             'gamma': 1.0,
             'rho': 1.0,
         }
-
-    model = get_params()
 
     # Construir modelo mínimo si el mapping por nombre no incluye los equipos solicitados
     def _norm(s: str) -> str:
