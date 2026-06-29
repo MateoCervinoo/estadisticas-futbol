@@ -1,11 +1,11 @@
 
-from typing import List
+from typing import List, Optional
 
 import logging
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 
 from .database import engine, ensure_partido_columns
 from .models import Partido, Equipo
@@ -167,29 +167,51 @@ def _enrich_partido_item(p: Partido, session: Session) -> dict:
     return item
 
 
+@app.get("/api/partidos/anyos")
+def api_list_anyos():
+    """Devuelve los años disponibles en la base de datos (para el filtro de año)."""
+    with Session(engine) as session:
+        import datetime
+        all_fechas = session.exec(select(Partido.fecha_utc)).all()
+        years = sorted({dt.year for dt in all_fechas if dt is not None})
+        return years
+
+
 @app.get("/api/partidos")
-def api_list_partidos(mundial: bool = False, proximos: bool = False):
+def api_list_partidos(
+    mundial: bool = False,
+    proximos: bool = False,
+    year: Optional[int] = None,
+):
     """Devuelve partidos ordenados por fecha.
     - mundial=true: solo FIFA World Cup
     - proximos=true: solo estados NS/TIMED
-    - ambos: unión de ambos filtros
+    - year=AAAA: filtrar por año
+    - sin parámetros: todos los partidos
     """
     with Session(engine) as session:
         stmt = select(Partido).order_by(Partido.fecha_utc)
 
-        conditions = []
+        main_conditions = []
         if mundial:
             from .models import Torneo
             t = session.exec(
                 select(Torneo).where(Torneo.nombre_canonico == "FIFA World Cup")
             ).first()
             if t:
-                conditions.append(Partido.torneo_id == t.id)
+                main_conditions.append(Partido.torneo_id == t.id)
         if proximos:
-            conditions.append(Partido.estado.in_(["NS", "TIMED"]))
+            main_conditions.append(Partido.estado.in_(["NS", "TIMED"]))
 
-        if conditions:
-            stmt = stmt.where(or_(*conditions))
+        all_conditions = []
+        if main_conditions:
+            all_conditions.append(or_(*main_conditions))
+        if year is not None:
+            from sqlalchemy import extract
+            all_conditions.append(extract('year', Partido.fecha_utc) == year)
+
+        if all_conditions:
+            stmt = stmt.where(and_(*all_conditions))
 
         partidos: List[Partido] = session.exec(stmt).all()
         return [_enrich_partido_item(p, session) for p in partidos]

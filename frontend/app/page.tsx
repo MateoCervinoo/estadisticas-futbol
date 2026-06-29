@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { getPartidos, Partido } from '../src/services/api'
+import { getPartidos, getAniosDisponibles, Partido } from '../src/services/api'
 
 type ExactScore = {
   home: number
@@ -45,6 +45,25 @@ const TOURNAMENT_LABELS: Record<string, string> = {
   WORLD_CUP: 'Mundial',
 }
 
+const SkeletonCard = () => (
+  <div className="col-12 col-md-6 mb-3">
+    <div className="card bg-white shadow-sm border-0 rounded-3 mb-3 p-4 h-100" aria-hidden="true">
+      <div className="d-flex justify-content-between">
+        <div className="placeholder placeholder-lg col-4" />
+        <div className="placeholder placeholder-sm col-3" />
+      </div>
+      <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
+        <div className="placeholder col-3" />
+        <div className="placeholder placeholder-sm col-2" />
+        <div className="placeholder col-3" />
+      </div>
+      <div className="mt-3 d-flex justify-content-end">
+        <div className="placeholder placeholder-sm col-2" />
+      </div>
+    </div>
+  </div>
+)
+
 const STAGE_LABELS: Record<string, string> = {
   GROUP_STAGE: 'Fase de Grupos',
   ROUND_OF_16: 'Octavos de Final',
@@ -57,14 +76,19 @@ const STAGE_LABELS: Record<string, string> = {
 export default function Home() {
   const [partidos, setPartidos] = useState<Partido[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // start in loading state so the initial render shows a loading message
   const [loading, setLoading] = useState<boolean>(true)
   const [now, setNow] = useState<Date>(new Date())
+  const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined)
+  const [aniosDisponibles, setAniosDisponibles] = useState<number[]>([])
+
+  useEffect(() => {
+    getAniosDisponibles().then(setAniosDisponibles).catch(() => {})
+  }, [])
 
   useEffect(() => {
     let mounted = true
     setLoading(true)
-    getPartidos()
+    getPartidos(selectedYear)
       .then((data) => {
         if (mounted) setPartidos(data)
       })
@@ -78,7 +102,7 @@ export default function Home() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [selectedYear])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000)
@@ -227,6 +251,7 @@ export default function Home() {
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
   const [prediction, setPrediction] = useState<any | null>(null)
   const [predLoading, setPredLoading] = useState<boolean>(false)
+  const [fechaLoaded, setFechaLoaded] = useState<boolean>(false)
 
   const allMatches = partidos ?? []
   const competitionOptions = useMemo(
@@ -350,8 +375,12 @@ export default function Home() {
         </div>
         <hr className="border-top border-secondary mb-5" />
 
-        {/* Loading / Error */}
-        {(loading || partidos === null) && <div className="text-center text-muted py-4">Cargando partidos...</div>}
+        {/* Loading skeleton */}
+        {loading && partidos === null && (
+          <div className="row">
+            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
+        )}
         {error && <div className="alert alert-danger">Error: {error}</div>}
 
         <section>
@@ -386,20 +415,44 @@ export default function Home() {
               <div className="d-flex align-items-center justify-content-between gap-2">
                 <div>
                   <div className="fw-semibold">Filtros</div>
-                  <div className="small text-muted">Filtrá por competencia, etapa o grupo</div>
+                  <div className="small text-muted">Filtrá por año, competencia, etapa o grupo</div>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2"
-                  onClick={() => setShowFilters((value) => !value)}
-                >
-                  <span>{showFilters ? 'Ocultar' : 'Mostrar'}</span>
-                  <span aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
-                </button>
+                <div className="d-flex align-items-center gap-2">
+                  {!loading && partidos && (
+                    <span className="badge bg-secondary rounded-pill">{filteredMatches.length} partidos</span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-2"
+                    onClick={() => setShowFilters((value) => !value)}
+                  >
+                    <span>{showFilters ? 'Ocultar' : 'Mostrar'}</span>
+                    <span aria-hidden="true">{showFilters ? '▴' : '▾'}</span>
+                  </button>
+                </div>
               </div>
 
               {showFilters && (
                 <div className="pt-3">
+                  <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <span className="small text-muted">Año:</span>
+                    <button
+                      className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === undefined ? 'active' : ''}`}
+                      onClick={() => setSelectedYear(undefined)}
+                    >
+                      Todos
+                    </button>
+                    {aniosDisponibles.map((year) => (
+                      <button
+                        key={year}
+                        className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === year ? 'active' : ''}`}
+                        onClick={() => setSelectedYear(year)}
+                      >
+                        {year}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
                     <span className="small text-muted">Competición:</span>
                     {competitionOptions.map((opt) => (
@@ -442,6 +495,13 @@ export default function Home() {
               )}
             </div>
           </div>
+
+          {!loading && filteredMatches.length === 0 && (
+            <div className="text-center py-5">
+              <div className="text-muted fs-5 mb-2">No hay partidos</div>
+              <div className="small text-muted">Probá cambiando los filtros o seleccionando otro año</div>
+            </div>
+          )}
 
           <div className="row">
             {filteredMatches.map((p) => {
