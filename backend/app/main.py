@@ -285,7 +285,7 @@ def partido_prediccion_alt(partido_id: int):
     # Select model based on match category
     sel_model = getattr(app.state, 'sel_model', None)
     club_model = getattr(app.state, 'club_model', None)
-    model = select_model_for_match(partido_id, engine, sel_model, club_model)
+    model = select_model_for_match(partido.id if partido else partido_id, engine, sel_model, club_model)
     if model is None:
         model = {
             'teams': [],
@@ -435,3 +435,323 @@ def debug_datos_corruptos():
     except Exception:
         logger.exception("Error leyendo %s", chosen)
         raise HTTPException(status_code=500, detail="No se pudo leer el archivo de registros corruptos")
+
+
+# ──────────────────────────────────────────────
+# FASE 5 — Posiciones, Bracket, Perfil, Comparador
+# ──────────────────────────────────────────────
+
+
+@app.get("/api/torneos")
+def api_list_torneos():
+    """Devuelve todos los torneos con conteo de partidos."""
+    from .models import Torneo as TorneoModel
+    with Session(engine) as session:
+        torneos = session.exec(select(TorneoModel)).all()
+        result = []
+        for t in torneos:
+            count = session.exec(
+                select(Partido).where(Partido.torneo_id == t.id)
+            ).all()
+            result.append({
+                "id": t.id,
+                "nombre_canonico": t.nombre_canonico,
+                "tipo": t.tipo,
+                "categoria": t.categoria,
+                "nivel": t.nivel,
+                "total_partidos": len(count),
+            })
+        return result
+
+
+@app.get("/api/torneos/{torneo_id}/tabla-posiciones")
+def api_torneo_tabla(torneo_id: int):
+    """Calcula tabla de posiciones para un torneo (todos los tiempos, sin grupo/etapa)."""
+    from .models import Torneo as TorneoModel, Equipo as EquipoModel
+    with Session(engine) as session:
+        torneo = session.get(TorneoModel, torneo_id)
+        if not torneo:
+            raise HTTPException(404, "Torneo no encontrado")
+
+        partidos = session.exec(
+            select(Partido).where(
+                Partido.torneo_id == torneo_id,
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+            )
+        ).all()
+
+    stats: dict[int, dict] = {}
+    for p in partidos:
+        for eid in (p.equipo_local_id, p.equipo_visitante_id):
+            if eid and eid not in stats:
+                stats[eid] = {"pj": 0, "pg": 0, "pe": 0, "pp": 0, "gf": 0, "gc": 0, "xg_favor": 0.0, "xg_contra": 0.0}
+
+        if p.equipo_local_id and p.equipo_visitante_id:
+            gl, gv = p.goles_local, p.goles_visitante
+            stats[p.equipo_local_id]["pj"] += 1
+            stats[p.equipo_visitante_id]["pj"] += 1
+            stats[p.equipo_local_id]["gf"] += gl
+            stats[p.equipo_local_id]["gc"] += gv
+            stats[p.equipo_visitante_id]["gf"] += gv
+            stats[p.equipo_visitante_id]["gc"] += gl
+
+            if p.xg_local:
+                stats[p.equipo_local_id]["xg_favor"] += float(p.xg_local)
+                stats[p.equipo_visitante_id]["xg_contra"] += float(p.xg_local)
+            if p.xg_visitante:
+                stats[p.equipo_visitante_id]["xg_favor"] += float(p.xg_visitante)
+                stats[p.equipo_local_id]["xg_contra"] += float(p.xg_visitante)
+
+            if gl > gv:
+                stats[p.equipo_local_id]["pg"] += 1
+                stats[p.equipo_visitante_id]["pp"] += 1
+            elif gl < gv:
+                stats[p.equipo_visitante_id]["pg"] += 1
+                stats[p.equipo_local_id]["pp"] += 1
+            else:
+                stats[p.equipo_local_id]["pe"] += 1
+                stats[p.equipo_visitante_id]["pe"] += 1
+
+    rows = []
+    with Session(engine) as session:
+        for eid, s in stats.items():
+            eq = session.get(Equipo, eid)
+            nombre = eq.nombre_canonico or eq.nombre_es or eq.nombre_csv or f"Equipo {eid}" if eq else f"Equipo {eid}"
+            codigo = eq.codigo_bandera if eq else None
+            rows.append({
+                "equipo_id": eid,
+                "equipo": nombre,
+                "codigo_bandera": codigo,
+                "pj": s["pj"],
+                "pg": s["pg"],
+                "pe": s["pe"],
+                "pp": s["pp"],
+                "gf": s["gf"],
+                "gc": s["gc"],
+                "gd": s["gf"] - s["gc"],
+                "pts": s["pg"] * 3 + s["pe"],
+                "xg_favor": round(s["xg_favor"], 2),
+                "xg_contra": round(s["xg_contra"], 2),
+                "xg_diff": round(s["xg_favor"] - s["xg_contra"], 2),
+            })
+
+    rows.sort(key=lambda r: (-r["pts"], -r["gd"], -r["gf"]))
+    return {"torneo": torneo.nombre_canonico, "tipo": torneo.tipo, "tabla": rows}
+
+
+@app.get("/api/torneos/{torneo_id}/bracket")
+def api_torneo_bracket(torneo_id: int):
+    """Devuelve estructura eliminatoria (bracket) para un torneo."""
+    with Session(engine) as session:
+        torneo = session.get(Torneo, torneo_id)
+        if not torneo:
+            raise HTTPException(404, "Torneo no encontrado")
+
+        partidos = session.exec(
+            select(Partido).where(
+                Partido.torneo_id == torneo_id,
+                Partido.etapa.isnot(None),
+                Partido.etapa != "",
+            ).order_by(Partido.fecha_utc)
+        ).all()
+
+    STAGE_ORDER = {
+        "GROUP_STAGE": 0, "ROUND_OF_16": 1, "QUARTER_FINALS": 2,
+        "SEMI_FINALS": 3, "THIRD_PLACE": 4, "FINAL": 5,
+    }
+    STAGE_LABELS = {
+        "GROUP_STAGE": "Fase de Grupos", "ROUND_OF_16": "Octavos",
+        "QUARTER_FINALS": "Cuartos", "SEMI_FINALS": "Semifinales",
+        "THIRD_PLACE": "Tercer Puesto", "FINAL": "Final",
+    }
+
+    rondas: dict[str, list] = {}
+    for p in partidos:
+        etapa = p.etapa.upper() if p.etapa else ""
+        if etapa not in rondas:
+            rondas[etapa] = []
+        name_local = p.home_team or ""
+        name_away = p.away_team or ""
+        if not name_local or not name_away:
+            with Session(engine) as s:
+                if p.equipo_local_id:
+                    eq = s.get(Equipo, p.equipo_local_id)
+                    name_local = eq.nombre_canonico or eq.nombre_csv or f"E{p.equipo_local_id}" if eq else f"E{p.equipo_local_id}"
+                if p.equipo_visitante_id:
+                    eq = s.get(Equipo, p.equipo_visitante_id)
+                    name_away = eq.nombre_canonico or eq.nombre_csv or f"E{p.equipo_visitante_id}" if eq else f"E{p.equipo_visitante_id}"
+
+        rondas[etapa].append({
+            "partido_id": p.id,
+            "home_team": name_local,
+            "away_team": name_away,
+            "home_score": p.goles_local,
+            "away_score": p.goles_visitante,
+            "estado": p.estado,
+            "fecha": p.fecha_utc.isoformat() if p.fecha_utc else None,
+            "grupo": p.grupo,
+        })
+
+    bracket = []
+    for etapa in sorted(rondas.keys(), key=lambda e: STAGE_ORDER.get(e, 99)):
+        bracket.append({
+            "stage": etapa,
+            "label": STAGE_LABELS.get(etapa, etapa),
+            "order": STAGE_ORDER.get(etapa, 99),
+            "matches": rondas[etapa],
+        })
+
+    return {"torneo": torneo.nombre_canonico, "bracket": bracket}
+
+
+@app.get("/api/equipos/{equipo_id}/perfil")
+def api_equipo_perfil(equipo_id: int):
+    """Perfil de equipo: forma última 5, estadísticas, próximos partidos."""
+    with Session(engine) as session:
+        eq = session.get(Equipo, equipo_id)
+        if not eq:
+            raise HTTPException(404, "Equipo no encontrado")
+
+        # Últimos 5 partidos
+        ultimos = session.exec(
+            select(Partido).where(
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+                (Partido.equipo_local_id == equipo_id) | (Partido.equipo_visitante_id == equipo_id),
+            ).order_by(Partido.fecha_utc.desc()).limit(5)
+        ).all()
+
+        forma = []
+        for p in reversed(ultimos):
+            gl, gv = p.goles_local, p.goles_visitante
+            if p.equipo_local_id == equipo_id:
+                resultado = "H" if gl > gv else "A" if gl < gv else "D"
+                rival_id = p.equipo_visitante_id
+            else:
+                resultado = "A" if gl > gv else "H" if gl < gv else "D"
+                rival_id = p.equipo_local_id
+            rival = session.get(Equipo, rival_id)
+            forma.append({
+                "partido_id": p.id,
+                "resultado": resultado,
+                "goles_favor": gl if p.equipo_local_id == equipo_id else gv,
+                "goles_contra": gv if p.equipo_local_id == equipo_id else gl,
+                "rival": rival.nombre_canonico or rival.nombre_csv if rival else f"E{rival_id}",
+                "fecha": p.fecha_utc.isoformat() if p.fecha_utc else None,
+            })
+
+        # Próximos partidos
+        proximos = session.exec(
+            select(Partido).where(
+                Partido.estado.in_(["NS", "TIMED"]),
+                (Partido.equipo_local_id == equipo_id) | (Partido.equipo_visitante_id == equipo_id),
+            ).order_by(Partido.fecha_utc).limit(5)
+        ).all()
+
+        upcoming = []
+        for p in proximos:
+            is_local = p.equipo_local_id == equipo_id
+            rival_id = p.equipo_visitante_id if is_local else p.equipo_local_id
+            rival = session.get(Equipo, rival_id)
+            upcoming.append({
+                "partido_id": p.id,
+                "fixture_id": p.fixture_id,
+                "local": is_local,
+                "rival": rival.nombre_canonico or rival.nombre_csv if rival else f"E{rival_id}",
+                "fecha": p.fecha_utc.isoformat() if p.fecha_utc else None,
+                "torneo_id": p.torneo_id,
+                "home_team": p.home_team,
+                "away_team": p.away_team,
+            })
+
+        # Estadísticas totales del equipo en todos los partidos
+        totales = session.exec(
+            select(Partido).where(
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+                (Partido.equipo_local_id == equipo_id) | (Partido.equipo_visitante_id == equipo_id),
+            )
+        ).all()
+
+        pj = len(totales)
+        pg = sum(1 for p in totales if (p.equipo_local_id == equipo_id and p.goles_local > p.goles_visitante) or (p.equipo_visitante_id == equipo_id and p.goles_visitante > p.goles_local))
+        pe = sum(1 for p in totales if p.goles_local == p.goles_visitante)
+        pp = pj - pg - pe
+        gf = sum(p.goles_local for p in totales if p.equipo_local_id == equipo_id) + sum(p.goles_visitante for p in totales if p.equipo_visitante_id == equipo_id)
+        gc = sum(p.goles_visitante for p in totales if p.equipo_local_id == equipo_id) + sum(p.goles_local for p in totales if p.equipo_visitante_id == equipo_id)
+
+        return {
+            "equipo_id": equipo_id,
+            "nombre": eq.nombre_canonico or eq.nombre_es or eq.nombre_csv,
+            "codigo_bandera": eq.codigo_bandera,
+            "forma": forma,
+            "proximos": upcoming,
+            "stats": {"pj": pj, "pg": pg, "pe": pe, "pp": pp, "gf": gf, "gc": gc, "gd": gf - gc, "pts": pg * 3 + pe},
+        }
+
+
+@app.get("/api/equipos/comparar")
+def api_equipos_comparar(eq1: int, eq2: int):
+    """Comparación lado a lado entre dos equipos."""
+    with Session(engine) as session:
+        e1 = session.get(Equipo, eq1)
+        e2 = session.get(Equipo, eq2)
+        if not e1 or not e2:
+            raise HTTPException(404, "Uno o ambos equipos no encontrados")
+
+        def _team_stats(eid: int):
+            matches = session.exec(
+                select(Partido).where(
+                    Partido.estado == "FT",
+                    Partido.goles_local.isnot(None),
+                    Partido.goles_visitante.isnot(None),
+                    (Partido.equipo_local_id == eid) | (Partido.equipo_visitante_id == eid),
+                )
+            ).all()
+            pj = len(matches)
+            pg = sum(1 for p in matches if (p.equipo_local_id == eid and p.goles_local > p.goles_visitante) or (p.equipo_visitante_id == eid and p.goles_visitante > p.goles_local))
+            pe = sum(1 for p in matches if p.goles_local == p.goles_visitante)
+            pp = pj - pg - pe
+            gf = sum(p.goles_local for p in matches if p.equipo_local_id == eid) + sum(p.goles_visitante for p in matches if p.equipo_visitante_id == eid)
+            gc = sum(p.goles_visitante for p in matches if p.equipo_local_id == eid) + sum(p.goles_local for p in matches if p.equipo_visitante_id == eid)
+            xg_favor = sum(float(p.xg_local) for p in matches if p.equipo_local_id == eid and p.xg_local) + sum(float(p.xg_visitante) for p in matches if p.equipo_visitante_id == eid and p.xg_visitante)
+            xg_contra = sum(float(p.xg_visitante) for p in matches if p.equipo_local_id == eid and p.xg_visitante) + sum(float(p.xg_local) for p in matches if p.equipo_visitante_id == eid and p.xg_local)
+            return {"pj": pj, "pg": pg, "pe": pe, "pp": pp, "gf": gf, "gc": gc, "gd": gf - gc, "pts": pg * 3 + pe, "xg_favor": round(xg_favor, 2), "xg_contra": round(xg_contra, 2)}
+
+        stats1 = _team_stats(eq1)
+        stats2 = _team_stats(eq2)
+
+        # H2H directo
+        h2h_matches = session.exec(
+            select(Partido).where(
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+                ((Partido.equipo_local_id == eq1) & (Partido.equipo_visitante_id == eq2)) |
+                ((Partido.equipo_local_id == eq2) & (Partido.equipo_visitante_id == eq1)),
+            )
+        ).all()
+
+        h2h = {"eq1_wins": 0, "eq2_wins": 0, "draws": 0, "matches": []}
+        for p in h2h_matches:
+            if p.equipo_local_id == eq1:
+                g1, g2 = p.goles_local, p.goles_visitante
+            else:
+                g1, g2 = p.goles_visitante, p.goles_local
+            if g1 > g2:
+                h2h["eq1_wins"] += 1
+            elif g1 < g2:
+                h2h["eq2_wins"] += 1
+            else:
+                h2h["draws"] += 1
+            h2h["matches"].append({"eq1_goals": g1, "eq2_goals": g2, "fecha": p.fecha_utc.isoformat() if p.fecha_utc else None})
+
+        return {
+            "equipo1": {"id": e1.id, "nombre": e1.nombre_canonico or e1.nombre_es or e1.nombre_csv, "codigo_bandera": e1.codigo_bandera, "stats": stats1},
+            "equipo2": {"id": e2.id, "nombre": e2.nombre_canonico or e2.nombre_es or e2.nombre_csv, "codigo_bandera": e2.codigo_bandera, "stats": stats2},
+            "h2h": h2h,
+        }
