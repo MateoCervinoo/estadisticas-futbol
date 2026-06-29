@@ -168,6 +168,13 @@ class APIFootballClient:
 
             half_time = match.get('score', {}).get('halfTime', {}) or {}
 
+            # Extraer nombre del torneo desde la respuesta (FIFA World Cup, UEFA Euro, etc.)
+            competition_name = None
+            try:
+                competition_name = match.get('competition', {}).get('name')
+            except Exception:
+                pass
+
             fixtures.append({
                 'fixture_id': fixture_id,
                 'date': date,
@@ -181,7 +188,7 @@ class APIFootballClient:
                 'group': match.get('group'),
                 'home_crest_url': match.get('homeTeam', {}).get('crest'),
                 'away_crest_url': match.get('awayTeam', {}).get('crest'),
-                # El mapeo a estados internos se hace en sync.py
+                'tournament': competition_name,
                 'status': status_api,
             })
 

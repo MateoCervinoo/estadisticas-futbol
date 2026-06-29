@@ -209,8 +209,9 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
 
     # Minimizar columnas tratadas; asegurarnos de que exista 'tournament'
     if 'tournament' not in df.columns:
-        # Evitar problemas de esquema: añadimos la columna con valor por defecto
-        df['tournament'] = 'Mundial'
+        # Fallback: el CSV debería tener columna tournament, pero si falta,
+        # normalize_tournament('') devuelve 'Amistoso'
+        df['tournament'] = ''
 
     cols = ["date", "home_team", "away_team", "home_score", "away_score", "neutral", "tournament"]
     df = df[cols].copy()
@@ -278,6 +279,7 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                     goles_local=int(row["home_score"]) if pd.notna(row["home_score"]) else None,
                     goles_visitante=int(row["away_score"]) if pd.notna(row["away_score"]) else None,
                     estado=normalize_status("FINISHED", source="csv"),
+                    fuente_origen="csv_historical",
                 )
                 if 'tournament' in row.index:
                     nuevo.tournament = normalize_tournament(row.get('tournament'))

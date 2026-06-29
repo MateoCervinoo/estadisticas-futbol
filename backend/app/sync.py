@@ -111,7 +111,7 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
             away_crest_url = f.get('away_crest_url')
             raw_status = f.get('status')
             status = normalize_status(raw_status, source="api")
-            tournament = normalize_tournament('Mundial')
+            tournament = normalize_tournament(f.get('tournament')) or 'Mundial'
 
             # Resolver torneo_id
             torneo_id = None

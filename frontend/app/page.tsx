@@ -30,12 +30,17 @@ const CLOCK_LABEL_FORMAT: Intl.DateTimeFormatOptions = {
 }
 
 const TOURNAMENT_LABELS: Record<string, string> = {
-  GROUP_STAGE: 'Fase de Grupos',
-  ROUND_OF_16: 'Octavos de Final',
-  QUARTER_FINALS: 'Cuartos de Final',
-  SEMI_FINALS: 'Semifinales',
-  THIRD_PLACE: 'Tercer Puesto',
-  FINAL: 'Final',
+  Mundial: 'Mundial',
+  Clasificatorias: 'Clasificatorias',
+  Amistoso: 'Amistoso',
+  'Copa América': 'Copa América',
+  Eurocopa: 'Eurocopa',
+  'Nations League': 'Nations League',
+  Confederaciones: 'Copa Confederaciones',
+  'Copa Africana de Naciones': 'Copa Africana',
+  'Copa Asiática': 'Copa Asiática',
+  'Copa Oro': 'Copa Oro',
+  'Juegos Olímpicos': 'Juegos Olímpicos',
   FIFA_WORLD_CUP: 'Mundial',
   WORLD_CUP: 'Mundial',
 }
@@ -143,13 +148,13 @@ export default function Home() {
 
   const tournamentOf = (p: Partido) => {
     const rawTournament = p.tournament?.trim()
-    if (!rawTournament) return 'Mundial'
+    if (!rawTournament) return 'Desconocido'
     return TOURNAMENT_LABELS[rawTournament] ?? rawTournament
   }
 
   const stageOf = (p: Partido) => {
     const rawStage = p.stage?.trim()
-    if (!rawStage) return 'Sin etapa'
+    if (!rawStage) return ''
     return STAGE_LABELS[rawStage] ?? rawStage
   }
 
@@ -446,7 +451,7 @@ export default function Home() {
                 <div key={p.id} className="col-12 col-md-6 mb-3">
                   <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
                     <div className="d-flex justify-content-between align-items-start gap-3">
-                      <div className="small text-muted">{tournamentOf(p)} · {stageOf(p)}{p.group ? ` · ${groupOf(p)}` : ''}</div>
+                      <div className="small text-muted">{tournamentOf(p)}{stageOf(p) ? ` · ${stageOf(p)}` : ''}{p.group ? ` · ${groupOf(p)}` : ''}</div>
                       <div className="small text-muted text-end">{formatDate(p.date)}</div>
                     </div>
 
@@ -504,7 +509,7 @@ export default function Home() {
                       {tournamentOf(selectedMatch)}
                     </h2>
                     <div className="small text-muted">
-                      {stageOf(selectedMatch)}{selectedMatch.group ? ` · ${groupOf(selectedMatch)}` : ''} - {formatDate(selectedMatch.date)}
+                      {stageOf(selectedMatch) ? `${stageOf(selectedMatch)} · ` : ''}{selectedMatch.group ? `${groupOf(selectedMatch)} · ` : ''}{formatDate(selectedMatch.date)}
                     </div>
                   </div>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeModal} />
