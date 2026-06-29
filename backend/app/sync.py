@@ -15,7 +15,7 @@ from typing import Dict, Any, List, Optional
 from sqlmodel import Session, select
 
 from .api_client import APIFootballClient
-from .models import Partido
+from .models import Partido, PartidoEstadisticas
 from .database import engine, init_db, ensure_partido_columns
 from .data_mapper import normalize_status, normalize_tournament
 
@@ -254,10 +254,38 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
                 logger.exception(msg)
                 errors.append(msg)
 
+    # Fase 2: Poblar PartidoEstadisticas con xG calculado (si existe en Partido)
+    # football-data.org free tier no provee estadísticas detalladas. El xG local
+    # ya está calculado en Partido.xg_local/xg_visitante. Lo copiamos a PartidoEstadisticas
+    # para que esté disponible via el endpoint de estadísticas.
+    stats_fetched = 0
+    try:
+        finished = session.exec(
+            select(Partido).where(Partido.estado.in_(FINAL_STATUSES))
+        ).all()
+        for p in finished:
+            existing = session.get(PartidoEstadisticas, (p.id, 'api_football_data'))
+            if existing:
+                continue
+            if p.xg_local is None and p.xg_visitante is None:
+                continue
+            pe = PartidoEstadisticas(
+                partido_id=p.id,
+                fuente='api_football_data',
+                xg_local=p.xg_local,
+                xg_visitante=p.xg_visitante,
+            )
+            session.add(pe)
+            session.commit()
+            stats_fetched += 1
+    except Exception:
+        logger.exception("Error poblando PartidoEstadisticas desde xG de Partido")
+
     summary = {
         'total_fetched': len(fixtures),
         'created': created,
         'updated': updated,
+        'stats_fetched': stats_fetched,
         'errors': errors,
     }
     return summary

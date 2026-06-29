@@ -66,7 +66,48 @@ export async function getAniosDisponibles(): Promise<number[]> {
   }
 }
 
+export interface PartidoEstadisticas {
+  partido_id: number
+  fuente: string
+  xg_local: number | null
+  xg_visitante: number | null
+  remates_local: number | null
+  remates_visitante: number | null
+  remates_puerta_local: number | null
+  remates_puerta_visitante: number | null
+  remates_fuera_local: number | null
+  remates_fuera_visitante: number | null
+  remates_bloqueados_local: number | null
+  remates_bloqueados_visitante: number | null
+  posesion_local: number | null
+  posesion_visitante: number | null
+  corners_local: number | null
+  corners_visitante: number | null
+  faltas_local: number | null
+  faltas_visitante: number | null
+  tarjetas_amarillas_local: number | null
+  tarjetas_amarillas_visitante: number | null
+  tarjetas_rojas_local: number | null
+  tarjetas_rojas_visitante: number | null
+  fueras_juego_local: number | null
+  fueras_juego_visitante: number | null
+  paradas_local: number | null
+  paradas_visitante: number | null
+}
+
 export async function getPartidosFinalizados(): Promise<Partido[]> {
   const partidos = await getPartidos()
   return partidos.filter((p) => p.status === 'FT')
+}
+
+export async function getPartidoEstadisticas(partidoId: number): Promise<PartidoEstadisticas | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/partidos/${partidoId}/estadisticas`)
+    if (!res.ok) return null
+    const data = await safeJson(res)
+    const stats = data?.estadisticas?.[0] ?? null
+    return stats as PartidoEstadisticas | null
+  } catch {
+    return null
+  }
 }
