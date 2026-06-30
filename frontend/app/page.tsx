@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import { getPartidos, getAniosDisponibles, getPartidoEstadisticas, Partido, PartidoEstadisticas } from '../src/services/api'
+import { getFavorites, toggleFavorite, isFavorite } from '../src/services/favorites'
 
 type ExactScore = {
   home: number
@@ -105,9 +106,13 @@ export default function Home() {
   const [now, setNow] = useState<Date>(new Date())
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined)
   const [aniosDisponibles, setAniosDisponibles] = useState<number[]>([])
+  const [favorites, setFavorites] = useState<number[]>([])
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
 
   useEffect(() => {
     getAniosDisponibles().then(setAniosDisponibles).catch(() => {})
+    setFavorites(getFavorites())
   }, [])
 
   useEffect(() => {
@@ -140,6 +145,21 @@ export default function Home() {
     return () => window.clearInterval(timer)
   }, [])
 
+  // Auto-dismiss toasts after 5s
+  useEffect(() => {
+    if (toasts.length === 0) return
+    const t = setTimeout(() => setToasts((prev) => prev.slice(1)), 5000)
+    return () => clearTimeout(t)
+  }, [toasts])
+
+  const handleToggleFav = useCallback((partidoId: number) => {
+    const nowFav = toggleFavorite(partidoId)
+    setFavorites(getFavorites())
+    if (nowFav) {
+      setToasts((prev) => [...prev, { id: Date.now(), msg: 'Agregado a Mis Partidos' }])
+    }
+  }, [])
+
   // WebSocket connection to re-fetch on live notifications
   const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/matches'
 
@@ -156,6 +176,12 @@ export default function Home() {
             getPartidos(selectedYear).then((data) => {
               if (data) setPartidos(data)
             }).catch(() => {})
+            const pid = msg.data?.partido_id
+            if (pid && getFavorites().includes(pid)) {
+              setToasts((prev) => [...prev, { id: Date.now(), msg: `⭐ ${msg.data.mensaje}` }])
+            } else if (pid) {
+              setToasts((prev) => [...prev, { id: Date.now(), msg: msg.data.mensaje }])
+            }
           }
         } catch {}
       }
@@ -374,8 +400,9 @@ export default function Home() {
     const matchesCompetition = !competitionFilter || competitionFilter === 'Todos' || tournamentOf(p) === competitionFilter
     const matchesStage = !stageFilter || stageFilter === 'Todos' || stageOf(p) === stageFilter
     const matchesGroup = !groupFilter || groupFilter === 'Todos' || groupOf(p) === groupFilter
+    const matchesFav = !showFavoritesOnly || favorites.includes(p.id)
 
-    return matchesDate && matchesCompetition && matchesStage && matchesGroup
+    return matchesDate && matchesCompetition && matchesStage && matchesGroup && matchesFav
   })
 
   const openSimulate = (p: Partido) => {
@@ -528,6 +555,15 @@ export default function Home() {
                   </div>
 
                   <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <button
+                      className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
+                      onClick={() => setShowFavoritesOnly((v) => !v)}
+                    >
+                      ⭐ Mis Partidos {favorites.length > 0 && `(${favorites.length})`}
+                    </button>
+                  </div>
+
+                  <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
                     <span className="small text-muted">Competición:</span>
                     {competitionOptions.map((opt) => (
                       <button
@@ -600,6 +636,15 @@ export default function Home() {
                   <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
                     <div className="d-flex justify-content-between align-items-start gap-3">
                       <div className="small text-muted d-flex align-items-center gap-2">
+                        <span
+                          role="button"
+                          className={`${favorites.includes(p.id) ? 'text-warning' : 'text-muted'}`}
+                          onClick={() => handleToggleFav(p.id)}
+                          style={{ cursor: 'pointer', fontSize: '1rem' }}
+                          title={favorites.includes(p.id) ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+                        >
+                          {favorites.includes(p.id) ? '★' : '☆'}
+                        </span>
                         {tournamentOf(p)}{stageOf(p) ? ` · ${stageOf(p)}` : ''}{p.group ? ` · ${groupOf(p)}` : ''}
                         {p.status === 'IN_PLAY' && (
                           <span className="badge bg-danger rounded-pill live-pulse small">EN VIVO</span>
@@ -848,6 +893,18 @@ export default function Home() {
             <div className="modal-backdrop fade show" />
           </>
         )}
+      </div>
+
+      {/* Toast notifications */}
+      <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
+        {toasts.map((t) => (
+          <div key={t.id} className="toast show align-items-center text-bg-primary border-0 mb-2" role="alert">
+            <div className="d-flex">
+              <div className="toast-body small">{t.msg}</div>
+              <button type="button" className="btn-close btn-close-white me-2 m-auto" onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))} />
+            </div>
+          </div>
+        ))}
       </div>
 
     </main>

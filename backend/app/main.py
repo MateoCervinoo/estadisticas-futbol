@@ -578,6 +578,180 @@ def api_partidos_live():
 
 
 # ──────────────────────────────────────────────
+# FASE 7 — Análisis Avanzado + Dashboard
+# ──────────────────────────────────────────────
+
+
+import math
+from collections import Counter
+
+
+@app.get("/api/equipos/{equipo_id}/evolution")
+def api_equipo_evolution(equipo_id: int):
+    """Evolución de ataque/defensa (rolling avg) de un equipo en el tiempo."""
+    from .models import Equipo as EqModel
+    with Session(engine) as session:
+        eq = session.get(EqModel, equipo_id)
+        if not eq:
+            raise HTTPException(404, "Equipo no encontrado")
+        matches = session.exec(
+            select(Partido).where(
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+                (Partido.equipo_local_id == equipo_id) | (Partido.equipo_visitante_id == equipo_id),
+            ).order_by(Partido.fecha_utc)
+        ).all()
+        if not matches:
+            return {"equipo_id": equipo_id, "nombre": eq.nombre_canonico or "", "evolution": []}
+
+        points = []
+        for i in range(len(matches)):
+            is_local = matches[i].equipo_local_id == equipo_id
+            gf = matches[i].goles_local if is_local else matches[i].goles_visitante
+            gc = matches[i].goles_visitante if is_local else matches[i].goles_local
+            xgf = float(matches[i].xg_local) if is_local and matches[i].xg_local else (float(matches[i].xg_visitante) if not is_local and matches[i].xg_visitante else None)
+            xgc = float(matches[i].xg_visitante) if is_local and matches[i].xg_visitante else (float(matches[i].xg_local) if not is_local and matches[i].xg_local else None)
+            window = matches[max(0, i - 4):i + 1]
+            rolling_gf = sum(
+                (m.goles_local if m.equipo_local_id == equipo_id else m.goles_visitante) or 0
+                for m in window
+            ) / len(window)
+            rolling_gc = sum(
+                (m.goles_visitante if m.equipo_local_id == equipo_id else m.goles_local) or 0
+                for m in window
+            ) / len(window)
+            points.append({
+                "match_index": i + 1,
+                "fecha": matches[i].fecha_utc.isoformat() if matches[i].fecha_utc else None,
+                "resultado": "H" if gf > gc else ("A" if gf < gc else "D"),
+                "gf": gf or 0,
+                "gc": gc or 0,
+                "rolling_gf_avg": round(rolling_gf, 2),
+                "rolling_gc_avg": round(rolling_gc, 2),
+                "xg_favor": xgf,
+                "xg_contra": xgc,
+            })
+        return {"equipo_id": equipo_id, "nombre": eq.nombre_canonico or eq.nombre_es or eq.nombre_csv, "evolution": points}
+
+
+@app.get("/api/equipos/{equipo_id}/distribucion")
+def api_equipo_distribucion(equipo_id: int):
+    """Distribución real de goles vs Poisson esperada para un equipo."""
+    from .models import Equipo as EqModel
+    with Session(engine) as session:
+        eq = session.get(EqModel, equipo_id)
+        if not eq:
+            raise HTTPException(404, "Equipo no encontrado")
+        matches = session.exec(
+            select(Partido).where(
+                Partido.estado == "FT",
+                Partido.goles_local.isnot(None),
+                Partido.goles_visitante.isnot(None),
+                (Partido.equipo_local_id == equipo_id) | (Partido.equipo_visitante_id == equipo_id),
+            )
+        ).all()
+        if not matches:
+            return {"equipo_id": equipo_id, "nombre": eq.nombre_canonico or "", "total_partidos": 0, "avg_goles": 0, "distribucion": []}
+
+        goals_scored = []
+        for p in matches:
+            goals_scored.append(p.goles_local if p.equipo_local_id == equipo_id else p.goles_visitante)
+
+        actual_dist = Counter(goals_scored)
+        avg_goals = sum(goals_scored) / len(goals_scored)
+        max_goals = max(max(goals_scored), 5)
+        dist = []
+        for g in range(max_goals + 1):
+            poisson_prob = (avg_goals ** g) * math.exp(-avg_goals) / math.factorial(g)
+            actual_count = actual_dist.get(g, 0)
+            actual_pct = (actual_count / len(goals_scored)) * 100
+            dist.append({
+                "goles": g,
+                "actual_pct": round(actual_pct, 1),
+                "poisson_pct": round(poisson_prob * 100, 1),
+                "actual_partidos": actual_count,
+            })
+        return {
+            "equipo_id": equipo_id,
+            "nombre": eq.nombre_canonico or eq.nombre_es or eq.nombre_csv,
+            "total_partidos": len(matches),
+            "avg_goles": round(avg_goals, 2),
+            "distribucion": dist,
+        }
+
+
+@app.get("/api/analytics/xg-vs-real")
+def api_xg_vs_real(torneo_id: Optional[int] = None):
+    """Comparación xG vs goles reales por equipo (opcional filtrado por torneo)."""
+    from .models import Equipo as EqModel
+    with Session(engine) as session:
+        stmt = select(Partido).where(
+            Partido.estado == "FT",
+            Partido.goles_local.isnot(None),
+            Partido.goles_visitante.isnot(None),
+        )
+        if torneo_id is not None:
+            stmt = stmt.where(Partido.torneo_id == torneo_id)
+        matches = session.exec(stmt).all()
+
+        team_stats: dict = {}
+        for p in matches:
+            for eid, is_local in [(p.equipo_local_id, True), (p.equipo_visitante_id, False)]:
+                if eid is None:
+                    continue
+                if eid not in team_stats:
+                    team_stats[eid] = {"pj": 0, "goles": 0, "xg": 0.0}
+                team_stats[eid]["pj"] += 1
+                if is_local:
+                    team_stats[eid]["goles"] += p.goles_local or 0
+                    if p.xg_local:
+                        team_stats[eid]["xg"] += float(p.xg_local)
+                else:
+                    team_stats[eid]["goles"] += p.goles_visitante or 0
+                    if p.xg_visitante:
+                        team_stats[eid]["xg"] += float(p.xg_visitante)
+
+        result = []
+        for eid, stats in team_stats.items():
+            eq = session.get(EqModel, eid)
+            nombre = eq.nombre_canonico or eq.nombre_es or eq.nombre_csv if eq else f"E{eid}"
+            result.append({
+                "equipo_id": eid,
+                "nombre": nombre,
+                "codigo_bandera": eq.codigo_bandera if eq else None,
+                "pj": stats["pj"],
+                "goles": stats["goles"],
+                "xg": round(stats["xg"], 2),
+                "diferencia": round(stats["goles"] - stats["xg"], 2),
+                "goles_p90": round(stats["goles"] / stats["pj"], 2) if stats["pj"] else 0,
+                "xg_p90": round(stats["xg"] / stats["pj"], 2) if stats["pj"] else 0,
+            })
+        result.sort(key=lambda r: -r["goles"])
+        return result
+
+
+@app.get("/api/equipos/search")
+def api_equipos_search(q: str = ""):
+    """Busca equipos por nombre."""
+    from .models import Equipo as EqModel
+    with Session(engine) as session:
+        stmt = select(EqModel)
+        if q:
+            stmt = stmt.where(EqModel.nombre_canonico.ilike(f"%{q}%"))
+        stmt = stmt.order_by(EqModel.nombre_canonico).limit(50)
+        equipos = session.exec(stmt).all()
+        return [
+            {
+                "id": e.id,
+                "nombre": e.nombre_canonico or e.nombre_es or e.nombre_csv,
+                "codigo_bandera": e.codigo_bandera,
+            }
+            for e in equipos
+        ]
+
+
+# ──────────────────────────────────────────────
 # FASE 5 — Posiciones, Bracket, Perfil, Comparador
 # ──────────────────────────────────────────────
 

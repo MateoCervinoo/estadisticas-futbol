@@ -28,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <ul className="navbar-nav ms-auto align-items-center">
                 <li className="nav-item"><Link href="/" className="nav-link">Calendario</Link></li>
                 <li className="nav-item"><Link href="/torneos" className="nav-link">Torneos</Link></li>
+                <li className="nav-item"><Link href="/analisis" className="nav-link">Análisis</Link></li>
                 <li className="nav-item ms-2">
                   <NotificationBell />
                 </li>
