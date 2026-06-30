@@ -115,6 +115,7 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
     ht_goals_away = f.get('ht_goals_away')
     stage = f.get('stage')
     group = f.get('group')
+    matchday = f.get('matchday')
     home_crest_url = f.get('home_crest_url')
     away_crest_url = f.get('away_crest_url')
     raw_status = f.get('status')
@@ -181,6 +182,7 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 tournament=tournament,
                 etapa=stage,
                 grupo=group,
+                jornada=matchday,
                 home_crest_url=home_crest_url,
                 away_crest_url=away_crest_url,
             )
@@ -201,6 +203,7 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
             metadata_changed = (
                 existing.etapa != stage
                 or existing.grupo != group
+                or existing.jornada != matchday
                 or existing.home_crest_url != home_crest_url
                 or existing.away_crest_url != away_crest_url
                 or existing.goles_local_ht != ht_goals_home
@@ -243,6 +246,7 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 existing.tournament = tournament
                 existing.etapa = stage
                 existing.grupo = group
+                existing.jornada = matchday
                 existing.home_crest_url = home_crest_url
                 existing.away_crest_url = away_crest_url
 

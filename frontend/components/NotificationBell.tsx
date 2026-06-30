@@ -60,8 +60,10 @@ export default function NotificationBell() {
   useEffect(() => {
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let cancelled = false
 
     const connect = () => {
+      if (cancelled) return
       ws = new WebSocket(WS_URL)
       ws.onopen = () => {
         fetchCount()
@@ -75,7 +77,7 @@ export default function NotificationBell() {
         } catch {}
       }
       ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 5000)
+        if (!cancelled) reconnectTimer = setTimeout(connect, 5000)
       }
       ws.onerror = () => {
         ws?.close()
@@ -84,10 +86,15 @@ export default function NotificationBell() {
 
     connect()
     return () => {
-      ws?.close()
+      cancelled = true
+      if (ws?.readyState === WebSocket.CONNECTING) {
+        ws.onopen = () => ws?.close()
+      } else {
+        ws?.close()
+      }
       clearTimeout(reconnectTimer)
     }
-  }, [])
+  }, [WS_URL])
 
   return (
     <div ref={ref} className="position-relative">

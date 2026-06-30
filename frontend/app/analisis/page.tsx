@@ -7,9 +7,11 @@ import {
 } from 'recharts'
 
 type Tab = 'evolution' | 'xg-vs-real' | 'distribucion'
+type TeamType = 'club' | 'seleccion'
 
 export default function AnalisisPage() {
   const [tab, setTab] = useState<Tab>('evolution')
+  const [teamType, setTeamType] = useState<TeamType>('club')
   const [teamQuery, setTeamQuery] = useState('')
   const [teams, setTeams] = useState<{ id: number; nombre: string; codigo_bandera: string | null }[]>([])
   const [selectedTeam, setSelectedTeam] = useState<{ id: number; nombre: string } | null>(null)
@@ -30,12 +32,12 @@ export default function AnalisisPage() {
     }
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`${BASE_URL}/api/equipos/search?q=${encodeURIComponent(teamQuery)}`)
+        const res = await fetch(`${BASE_URL}/api/equipos/search?q=${encodeURIComponent(teamQuery)}&tipo=${teamType}`)
         if (res.ok) setTeams(await res.json())
       } catch {}
     }, 300)
     return () => clearTimeout(timer)
-  }, [teamQuery, BASE_URL])
+  }, [teamQuery, teamType, BASE_URL])
 
   // Fetch evolution when a team is selected
   useEffect(() => {
@@ -67,19 +69,29 @@ export default function AnalisisPage() {
   useEffect(() => {
     if (tab !== 'xg-vs-real') return
     setXgLoading(true)
-    fetch(`${BASE_URL}/api/analytics/xg-vs-real`)
+    fetch(`${BASE_URL}/api/analytics/xg-vs-real?tipo=${teamType}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) setXgData(data)
         setXgLoading(false)
       })
       .catch(() => setXgLoading(false))
-  }, [tab, BASE_URL])
+  }, [tab, teamType, BASE_URL])
 
   const selectTeam = useCallback((t: { id: number; nombre: string }) => {
     setSelectedTeam(t)
     setTeamQuery('')
     setTeams([])
+  }, [])
+
+  const changeTeamType = useCallback((type: TeamType) => {
+    setTeamType(type)
+    setSelectedTeam(null)
+    setTeamQuery('')
+    setTeams([])
+    setEvolution([])
+    setDistribucion([])
+    setXgData([])
   }, [])
 
   const downloadCSV = useCallback(() => {
@@ -107,6 +119,22 @@ export default function AnalisisPage() {
         {/* Team selector */}
         <div className="card shadow-sm border-0 rounded-3 mb-4">
           <div className="card-body">
+            <div className="btn-group btn-group-sm mb-3" role="group" aria-label="Tipo de equipo">
+              <button
+                type="button"
+                className={`btn ${teamType === 'club' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => changeTeamType('club')}
+              >
+                Clubes
+              </button>
+              <button
+                type="button"
+                className={`btn ${teamType === 'seleccion' ? 'btn-primary' : 'btn-outline-primary'}`}
+                onClick={() => changeTeamType('seleccion')}
+              >
+                Selecciones
+              </button>
+            </div>
             {selectedTeam ? (
               <div className="d-flex align-items-center justify-content-between">
                 <span className="fw-semibold">{selectedTeam.nombre}</span>

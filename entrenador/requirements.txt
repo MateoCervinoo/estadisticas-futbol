@@ -13,8 +13,8 @@ scipy>=1.10.0
 # API sources
 requests>=2.28.0
 
-# Soccerdata (optional — install extras as needed)
-# soccerdata>=2.0.0
+# Soccerdata
+soccerdata>=2.0.0
 
 # ML models (optional — Fase 2)
 # scikit-learn>=1.2.0

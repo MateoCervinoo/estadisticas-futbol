@@ -10,6 +10,7 @@ import logging
 import numpy as np
 
 logger = logging.getLogger(__name__)
+MUNDIAL_2026_START = "2026-06-11"
 
 # Rutas relativas dentro del contenedor Docker.
 # Allow overriding the historical CSV path via CSV_DATA_PATH environment variable
@@ -156,6 +157,14 @@ def load_historical_data(since_year=2022):
         # Si la auditoría falla de forma inesperada, no bloqueamos la carga; dejamos el df original
         logger.exception("Error durante la auditoría de datos. Se continuará con el dataset original sin separar corruptos.")
 
+    if "tournament" in df.columns:
+        world_cup_mask = df["tournament"].astype(str).str.lower().str.contains("world cup|mundial", na=False)
+        before_filter = len(df)
+        df = df[~(world_cup_mask & (df["date"] >= MUNDIAL_2026_START))].copy()
+        filtered = before_filter - len(df)
+        if filtered:
+            logger.info("Partidos del Mundial 2026 omitidos del histórico: %d", filtered)
+
     # 3. Leer y acoplar tandas de penales (shootouts) si existen
     if os.path.exists(SHOOTOUTS_PATH):
         df_shootouts = pd.read_csv(SHOOTOUTS_PATH)
@@ -213,6 +222,13 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
         # normalize_tournament('') devuelve 'Amistoso'
         df['tournament'] = ''
 
+    world_cup_mask = df["tournament"].astype(str).str.lower().str.contains("world cup|mundial", na=False)
+    before_filter = len(df)
+    df = df[~(world_cup_mask & (df["date"] >= MUNDIAL_2026_START))].copy()
+    filtered = before_filter - len(df)
+    if filtered:
+        logger.info("Partidos del Mundial 2026 omitidos de la ingesta histórica: %d", filtered)
+
     cols = ["date", "home_team", "away_team", "home_score", "away_score", "neutral", "tournament"]
     df = df[cols].copy()
 
@@ -228,7 +244,13 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
         # Reducir a rango de enteros 32-bit para mayor compatibilidad
         return int(md, 16) % (2 ** 31 - 1)
 
+    def make_hash_dedupe(row):
+        tournament = normalize_tournament(row.get('tournament'))
+        key = f"{row['date'].strftime('%Y-%m-%d')}|{str(row['home_team']).lower().strip()}|{str(row['away_team']).lower().strip()}|{str(tournament).lower().strip()}"
+        return hashlib.md5(key.encode("utf-8")).hexdigest()
+
     df["fixture_id"] = df.apply(make_fixture_id, axis=1)
+    df["hash_dedupe"] = df.apply(make_hash_dedupe, axis=1)
 
     total = len(df)
     logger.info("Iniciando ingesta de %d partidos históricos (desde %d)", total, since_year)
@@ -238,6 +260,7 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     with Session(engine) as session:
         for idx, row in df.iterrows():
             fid = int(row["fixture_id"])
+            hash_dedupe = row["hash_dedupe"]
             # Intentar mapear home/away a los IDs de Equipo usando nombre_csv
             home_team_id = None
             away_team_id = None
@@ -252,8 +275,10 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                 # No bloquear la ingesta si la tabla Equipo no existe aún
                 home_team_id = None
                 away_team_id = None
-            # Buscar partido existente por fixture_id
+            # Buscar partido existente por fixture_id o hash_dedupe para evitar duplicados cross-source
             existing = session.exec(select(Partido).where(Partido.fixture_id == fid)).first()
+            if not existing:
+                existing = session.exec(select(Partido).where(Partido.hash_dedupe == hash_dedupe)).first()
             if existing:
                 existing.fecha_utc = row["date"]
                 existing.home_team = row["home_team"]
@@ -263,6 +288,7 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                 existing.estado = normalize_status("FINISHED", source="csv")
                 if 'tournament' in row.index:
                     existing.tournament = normalize_tournament(row.get('tournament'))
+                existing.hash_dedupe = hash_dedupe
                 if home_team_id is not None:
                     existing.equipo_local_id = home_team_id
                 if away_team_id is not None:
@@ -280,6 +306,7 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                     goles_visitante=int(row["away_score"]) if pd.notna(row["away_score"]) else None,
                     estado=normalize_status("FINISHED", source="csv"),
                     fuente_origen="csv_historical",
+                    hash_dedupe=hash_dedupe,
                 )
                 if 'tournament' in row.index:
                     nuevo.tournament = normalize_tournament(row.get('tournament'))
@@ -324,6 +351,7 @@ def seed_equipos_if_empty():
         logger.info("Poblando tabla Equipo con selecciones de ejemplo...")
         for e in ejemplos:
             equipo = Equipo(
+                nombre_canonico=e["nombre_api"],
                 nombre_es=e["nombre_es"],
                 nombre_api=e.get("nombre_api"),
                 nombre_csv=e.get("nombre_csv"),

@@ -1,8 +1,8 @@
 "use client"
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react'
-import { getPartidos, getAniosDisponibles, getPartidoEstadisticas, Partido, PartidoEstadisticas } from '../src/services/api'
-import { getFavorites, toggleFavorite, isFavorite } from '../src/services/favorites'
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { getPartidos, getPartidoEstadisticas, getPartidoFilterMetadata, Partido, PartidoEstadisticas } from '../src/services/api'
+import { getFavorites, toggleFavorite } from '../src/services/favorites'
 
 type ExactScore = {
   home: number
@@ -71,27 +71,21 @@ const StatRow = ({ label, home, away, fmt = 'int' }: { label: string; home: numb
   )
 }
 
-const SkeletonCard = () => (
-  <div className="col-12 col-md-6 mb-3">
-    <div className="card bg-white shadow-sm border-0 rounded-3 mb-3 p-4 h-100" aria-hidden="true">
-      <div className="d-flex justify-content-between">
-        <div className="placeholder placeholder-lg col-4" />
-        <div className="placeholder placeholder-sm col-3" />
-      </div>
-      <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
-        <div className="placeholder col-3" />
-        <div className="placeholder placeholder-sm col-2" />
-        <div className="placeholder col-3" />
-      </div>
-      <div className="mt-3 d-flex justify-content-end">
-        <div className="placeholder placeholder-sm col-2" />
-      </div>
+const FootballLoader = () => (
+  <div className="football-loader my-4" role="status" aria-live="polite">
+    <div className="football-loader-field">
+      <div className="football-loader-ball" />
+      <div className="football-loader-shadow" />
     </div>
+    <div className="small text-muted text-center mt-2">Cargando partidos...</div>
   </div>
 )
 
 const STAGE_LABELS: Record<string, string> = {
   GROUP_STAGE: 'Fase de Grupos',
+  LAST_32: 'Dieciseisavos de Final',
+  ROUND_OF_32: 'Dieciseisavos de Final',
+  LAST_16: 'Octavos de Final',
   ROUND_OF_16: 'Octavos de Final',
   QUARTER_FINALS: 'Cuartos de Final',
   SEMI_FINALS: 'Semifinales',
@@ -103,22 +97,83 @@ export default function Home() {
   const [partidos, setPartidos] = useState<Partido[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
+  const [slowLoading, setSlowLoading] = useState<boolean>(false)
   const [now, setNow] = useState<Date>(new Date())
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined)
   const [aniosDisponibles, setAniosDisponibles] = useState<number[]>([])
+  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [availableCompetitions, setAvailableCompetitions] = useState<string[]>([])
+  const [availableStages, setAvailableStages] = useState<string[]>([])
+  const [availableGroups, setAvailableGroups] = useState<string[]>([])
+  const [availableMatchdays, setAvailableMatchdays] = useState<number[]>([])
   const [favorites, setFavorites] = useState<number[]>([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; msg: string }[]>([])
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
+  const [stageFilter, setStageFilter] = useState<string>('Todos')
+  const [groupFilter, setGroupFilter] = useState<string>('Todos')
+  const [matchdayFilter, setMatchdayFilter] = useState<number | undefined>(undefined)
+  const [showFilters, setShowFilters] = useState<boolean>(false)
+  const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
+  const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
+  const [prediction, setPrediction] = useState<any | null>(null)
+  const [predLoading, setPredLoading] = useState<boolean>(false)
+  const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
+  const [statsLoading, setStatsLoading] = useState<boolean>(false)
+  const [initialLoad, setInitialLoad] = useState<boolean>(true)
+
+  const hasActiveServerFilters = Boolean(
+    selectedYear !== undefined
+    || selectedDate
+    || competitionFilter !== 'Todos'
+    || stageFilter !== 'Todos'
+    || groupFilter !== 'Todos'
+    || matchdayFilter !== undefined
+    || showFavoritesOnly
+  )
 
   useEffect(() => {
-    getAniosDisponibles().then(setAniosDisponibles).catch(() => {})
+    getPartidoFilterMetadata()
+      .then((metadata) => {
+        setAniosDisponibles(metadata.years)
+        setAvailableDates(metadata.dates)
+        setAvailableCompetitions(metadata.tournaments)
+        setAvailableStages(metadata.stages)
+        setAvailableGroups(metadata.groups)
+        setAvailableMatchdays(metadata.matchdays)
+      })
+      .catch(() => {})
     setFavorites(getFavorites())
   }, [])
 
   useEffect(() => {
+    if (!hasActiveServerFilters) {
+      setPartidos(null)
+      setLoading(false)
+      setSlowLoading(false)
+      setError(null)
+      setInitialLoad(false)
+      return
+    }
+
     let mounted = true
+    let slowTimer: ReturnType<typeof setTimeout> | undefined
     setLoading(true)
-    getPartidos(selectedYear)
+    setSlowLoading(false)
+    setError(null)
+    slowTimer = setTimeout(() => {
+      if (mounted) setSlowLoading(true)
+    }, 6000)
+
+    getPartidos({
+      year: selectedYear,
+      date: selectedDate ?? undefined,
+      tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
+      stage: stageFilter !== 'Todos' ? stageFilter : undefined,
+      group: groupFilter !== 'Todos' ? groupFilter : undefined,
+      matchday: matchdayFilter,
+    })
       .then((data) => {
         if (mounted) {
           setPartidos(data)
@@ -132,13 +187,44 @@ export default function Home() {
         }
       })
       .finally(() => {
-        if (mounted) setLoading(false)
+        if (mounted) {
+          setLoading(false)
+          setSlowLoading(false)
+        }
+        if (slowTimer) clearTimeout(slowTimer)
       })
 
     return () => {
       mounted = false
+      if (slowTimer) clearTimeout(slowTimer)
     }
-  }, [selectedYear])
+  }, [selectedYear, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter, showFavoritesOnly, hasActiveServerFilters])
+
+  useEffect(() => {
+    getPartidoFilterMetadata({
+      year: selectedYear,
+      tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
+      stage: stageFilter !== 'Todos' ? stageFilter : undefined,
+    })
+      .then((metadata) => {
+        setAvailableStages(metadata.stages)
+        setAvailableGroups(metadata.groups)
+        setAvailableMatchdays(metadata.matchdays)
+      })
+      .catch(() => {})
+  }, [selectedYear, competitionFilter, stageFilter])
+
+  useEffect(() => {
+    setStageFilter('Todos')
+    setGroupFilter('Todos')
+    setMatchdayFilter(undefined)
+  }, [competitionFilter])
+
+  useEffect(() => {
+    if (stageFilter !== 'Todos' && stageFilter !== 'GROUP_STAGE') {
+      setGroupFilter('Todos')
+    }
+  }, [stageFilter])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000)
@@ -162,18 +248,50 @@ export default function Home() {
 
   // WebSocket connection to re-fetch on live notifications
   const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/matches'
+  const matchFiltersRef = useRef({
+    hasActiveServerFilters,
+    selectedYear,
+    selectedDate,
+    competitionFilter,
+    stageFilter,
+    groupFilter,
+    matchdayFilter,
+  })
+
+  useEffect(() => {
+    matchFiltersRef.current = {
+      hasActiveServerFilters,
+      selectedYear,
+      selectedDate,
+      competitionFilter,
+      stageFilter,
+      groupFilter,
+      matchdayFilter,
+    }
+  }, [hasActiveServerFilters, selectedYear, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter])
 
   useEffect(() => {
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let cancelled = false
 
     const connect = () => {
+      if (cancelled) return
       ws = new WebSocket(WS_URL)
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data)
           if (msg.type === 'notification') {
-            getPartidos(selectedYear).then((data) => {
+            const filters = matchFiltersRef.current
+            if (!filters.hasActiveServerFilters) return
+            getPartidos({
+              year: filters.selectedYear,
+              date: filters.selectedDate ?? undefined,
+              tournament: filters.competitionFilter !== 'Todos' ? filters.competitionFilter : undefined,
+              stage: filters.stageFilter !== 'Todos' ? filters.stageFilter : undefined,
+              group: filters.groupFilter !== 'Todos' ? filters.groupFilter : undefined,
+              matchday: filters.matchdayFilter,
+            }).then((data) => {
               if (data) setPartidos(data)
             }).catch(() => {})
             const pid = msg.data?.partido_id
@@ -186,7 +304,7 @@ export default function Home() {
         } catch {}
       }
       ws.onclose = () => {
-        reconnectTimer = setTimeout(connect, 5000)
+        if (!cancelled) reconnectTimer = setTimeout(connect, 5000)
       }
       ws.onerror = () => {
         ws?.close()
@@ -195,10 +313,15 @@ export default function Home() {
 
     connect()
     return () => {
-      ws?.close()
+      cancelled = true
+      if (ws?.readyState === WebSocket.CONNECTING) {
+        ws.onopen = () => ws?.close()
+      } else {
+        ws?.close()
+      }
       clearTimeout(reconnectTimer)
     }
-  }, [selectedYear])
+  }, [WS_URL])
 
   const formatScore = (s: number | null) => (s === null || s === undefined ? '-' : String(s))
   const parseMatchDate = (iso: string) => {
@@ -257,6 +380,7 @@ export default function Home() {
   }
 
   const isPlayed = (p: Partido) => {
+    if (['NS', 'TIMED', 'SCHEDULED', 'IN_PLAY', 'PAUSED'].includes(p.status)) return false
     const hasScore = p.home_score !== null && p.home_score !== undefined && p.away_score !== null && p.away_score !== undefined
     return hasScore || ['FT', 'AET', 'PEN'].includes(p.status)
   }
@@ -331,40 +455,62 @@ export default function Home() {
     return 'bg-danger text-white'
   }
 
-  // UI states for filters and modals
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
-  const [stageFilter, setStageFilter] = useState<string>('Todos')
-  const [groupFilter, setGroupFilter] = useState<string>('Todos')
-  const [showFilters, setShowFilters] = useState<boolean>(false)
-  // single selectedMatch controls any open modal; modalMode decides which modal to show
-  const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
-  const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
-  const [prediction, setPrediction] = useState<any | null>(null)
-  const [predLoading, setPredLoading] = useState<boolean>(false)
-  const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
-  const [statsLoading, setStatsLoading] = useState<boolean>(false)
-  const [fechaLoaded, setFechaLoaded] = useState<boolean>(false)
-  const [initialLoad, setInitialLoad] = useState<boolean>(true)
+  const rawStageLabel = (stage: string) => STAGE_LABELS[stage] ?? stage
+  const rawGroupLabel = (group: string) => group.replace('GROUP_', 'Grupo ')
 
-  const allMatches = partidos ?? []
+  const dedupeMatches = (matches: Partido[]) => {
+    const byKey = new Map<string, Partido>()
+    for (const match of matches) {
+      const key = [
+        dateKey(match.date),
+        (match.home_team || '').trim().toLowerCase(),
+        (match.away_team || '').trim().toLowerCase(),
+        tournamentOf(match).trim().toLowerCase(),
+      ].join('|')
+      const current = byKey.get(key)
+      if (!current) {
+        byKey.set(key, match)
+        continue
+      }
+
+      const currentIsApi = current.fixture_id !== null && current.fixture_id !== undefined
+      const nextIsApi = match.fixture_id !== null && match.fixture_id !== undefined
+      if ((!currentIsApi && nextIsApi) || (match.home_crest_url && !current.home_crest_url)) {
+        byKey.set(key, match)
+      }
+    }
+    return Array.from(byKey.values())
+  }
+
+  const allMatches = useMemo(() => dedupeMatches(partidos ?? []), [partidos])
   const competitionOptions = useMemo(
-    () => ['Todos', ...Array.from(new Set(allMatches.map(tournamentOf).filter(Boolean)))],
-    [allMatches]
+    () => ['Todos', ...Array.from(new Set(availableCompetitions.filter(Boolean)))],
+    [availableCompetitions]
   )
   const stageOptions = useMemo(
-    () => ['Todos', ...Array.from(new Set(allMatches.map(stageOf).filter(Boolean)))],
-    [allMatches]
+    () => ['Todos', ...Array.from(new Set(availableStages.filter(Boolean)))],
+    [availableStages]
   )
   const groupOptions = useMemo(
-    () => ['Todos', ...Array.from(new Set(allMatches.map(groupOf).filter((g) => g && g !== 'Sin grupo')))],
-    [allMatches]
+    () => ['Todos', ...Array.from(new Set(availableGroups.filter(Boolean)))],
+    [availableGroups]
+  )
+  const matchdayOptions = useMemo(
+    () => Array.from(new Set(availableMatchdays)).sort((a, b) => a - b),
+    [availableMatchdays]
   )
 
-  // build a list of unique dates for the calendar bar based on every match, including past days
-  const uniqueDates = Array.from(
-    new Set(allMatches.map((p) => dateKey(p.date)))
-  ).sort()
+  const uniqueDates = availableDates
+
+  const selectedCompetitionLabel = competitionFilter === 'Todos'
+    ? ''
+    : (TOURNAMENT_LABELS[competitionFilter] ?? competitionFilter)
+  const isWorldCupFilter = selectedCompetitionLabel === 'Mundial' || /world cup/i.test(competitionFilter)
+  const isQualifierFilter = /clasific|qualification|qualifier/i.test(selectedCompetitionLabel) || /qualification|qualifier/i.test(competitionFilter)
+  const isLeagueFilter = competitionFilter !== 'Todos' && !isWorldCupFilter && !isQualifierFilter
+  const showStageFilter = isWorldCupFilter
+  const showGroupFilter = isWorldCupFilter && (stageFilter === 'Todos' || stageFilter === 'GROUP_STAGE')
+  const showMatchdayFilter = isLeagueFilter && matchdayOptions.length > 0
 
   // map team names to flag-icon two-letter codes (extend as needed)
   const teamToFlag: Record<string, string> = {
@@ -395,15 +541,7 @@ export default function Home() {
     return 'bg-danger'
   }
 
-  const filteredMatches = allMatches.filter((p) => {
-    const matchesDate = !selectedDate || dateKey(p.date) === selectedDate
-    const matchesCompetition = !competitionFilter || competitionFilter === 'Todos' || tournamentOf(p) === competitionFilter
-    const matchesStage = !stageFilter || stageFilter === 'Todos' || stageOf(p) === stageFilter
-    const matchesGroup = !groupFilter || groupFilter === 'Todos' || groupOf(p) === groupFilter
-    const matchesFav = !showFavoritesOnly || favorites.includes(p.id)
-
-    return matchesDate && matchesCompetition && matchesStage && matchesGroup && matchesFav
-  })
+  const filteredMatches = allMatches.filter((p) => !showFavoritesOnly || favorites.includes(p.id))
 
   const openSimulate = (p: Partido) => {
     if (isPlayed(p)) return
@@ -476,12 +614,6 @@ export default function Home() {
         </div>
         <hr className="border-top border-secondary mb-5" />
 
-        {/* Loading skeleton */}
-        {loading && partidos === null && (
-          <div className="row">
-            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
-          </div>
-        )}
         {error && <div className="alert alert-danger">Error: {error}</div>}
 
         <section>
@@ -516,7 +648,7 @@ export default function Home() {
               <div className="d-flex align-items-center justify-content-between gap-2">
                 <div>
                   <div className="fw-semibold">Filtros</div>
-                  <div className="small text-muted">Filtrá por año, competencia, etapa o grupo</div>
+                  <div className="small text-muted">Filtrá por año, competencia y opciones propias del torneo</div>
                 </div>
                 <div className="d-flex align-items-center gap-2">
                   {!loading && partidos && (
@@ -571,44 +703,81 @@ export default function Home() {
                         className={`btn btn-outline-secondary btn-sm rounded-pill ${competitionFilter === opt ? 'active' : ''}`}
                         onClick={() => setCompetitionFilter(opt)}
                       >
-                        {opt}
+                        {TOURNAMENT_LABELS[opt] ?? opt}
                       </button>
                     ))}
                   </div>
 
-                  <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-                    <span className="small text-muted">Etapa:</span>
-                    {stageOptions.map((opt) => (
-                      <button
-                        key={`stage-${opt}`}
-                        className={`btn btn-outline-secondary btn-sm rounded-pill ${stageFilter === opt ? 'active' : ''}`}
-                        onClick={() => setStageFilter(opt)}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
+                  {showStageFilter && (
+                    <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                      <span className="small text-muted">Etapa:</span>
+                      {stageOptions.map((opt) => (
+                        <button
+                          key={`stage-${opt}`}
+                          className={`btn btn-outline-secondary btn-sm rounded-pill ${stageFilter === opt ? 'active' : ''}`}
+                          onClick={() => setStageFilter(opt)}
+                        >
+                          {opt === 'Todos' ? opt : rawStageLabel(opt)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-                  <div className="d-flex flex-wrap align-items-center gap-2">
-                    <span className="small text-muted">Grupo:</span>
-                    {groupOptions.map((opt) => (
+                  {showGroupFilter && (
+                    <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                      <span className="small text-muted">Grupo:</span>
+                      {groupOptions.map((opt) => (
+                        <button
+                          key={`group-${opt}`}
+                          className={`btn btn-outline-secondary btn-sm rounded-pill ${groupFilter === opt ? 'active' : ''}`}
+                          onClick={() => setGroupFilter(opt)}
+                        >
+                          {opt === 'Todos' ? opt : rawGroupLabel(opt)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {showMatchdayFilter && (
+                    <div className="d-flex flex-wrap align-items-center gap-2">
+                      <span className="small text-muted">Jornada:</span>
                       <button
-                        key={`group-${opt}`}
-                        className={`btn btn-outline-secondary btn-sm rounded-pill ${groupFilter === opt ? 'active' : ''}`}
-                        onClick={() => setGroupFilter(opt)}
+                        className={`btn btn-outline-secondary btn-sm rounded-pill ${matchdayFilter === undefined ? 'active' : ''}`}
+                        onClick={() => setMatchdayFilter(undefined)}
                       >
-                        {opt}
+                        Todas
                       </button>
-                    ))}
-                  </div>
+                      {matchdayOptions.map((matchday) => (
+                        <button
+                          key={`matchday-${matchday}`}
+                          className={`btn btn-outline-secondary btn-sm rounded-pill ${matchdayFilter === matchday ? 'active' : ''}`}
+                          onClick={() => setMatchdayFilter(matchday)}
+                        >
+                          Jornada {matchday}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
+          {loading && hasActiveServerFilters && <FootballLoader />}
+          {slowLoading && (
+            <div className="alert alert-warning">
+              La consulta está tardando más de lo esperado. Podés esperar o ajustar los filtros para acotar la búsqueda.
+            </div>
+          )}
+
           {!loading && filteredMatches.length === 0 && (
             <div className="text-center py-5">
-              {initialLoad ? (
+              {!hasActiveServerFilters ? (
+                <>
+                  <div className="text-muted fs-5 mb-2">Configurá un filtro para ver partidos</div>
+                  <div className="small text-muted">La app no descarga el calendario completo al iniciar</div>
+                </>
+              ) : initialLoad ? (
                 <>
                   <div className="text-muted fs-5 mb-2">Cargando partidos...</div>
                   <div className="small text-muted">Obteniendo datos del servidor</div>
