@@ -13,10 +13,10 @@ from datetime import datetime
 import random
 from bs4 import BeautifulSoup
 import requests
-from sqlmodel import Session, select
+from sqlmodel import select
 
+from .db.session import Session, engine
 from .models import Partido, EstadisticasPartido
-from .database import engine
 
 
 def _scrape_match_stats_external(match_url: str) -> dict:

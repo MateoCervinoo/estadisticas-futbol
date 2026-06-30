@@ -7,7 +7,8 @@ import sys
 
 try:
     # Importar módulos principales para detectar import cycles
-    from app.database import engine, init_db
+    from app.database import init_db
+    from app.db.session import engine
     from app.models import Equipo, Partido, EstadisticasPartido
     # fit_dixon_coles was moved out; import only prediction function
     from app.dixoncoles import predict_exact_score_matrix
@@ -15,7 +16,7 @@ except Exception as e:
     print("ERROR importing backend modules:", e)
     sys.exit(1)
 
-print("Backend imports OK. Initializing DB (metadata create_all)...")
+print("Backend imports OK. Applying DB migrations...")
 try:
     init_db()
     print("DB initialization OK.")

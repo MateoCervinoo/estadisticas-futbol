@@ -7,6 +7,7 @@ import {
   marcarNotificacionLeida,
   marcarTodasLeidas,
   NotificacionItem,
+  WS_URL,
 } from '../src/services/api'
 
 export default function NotificationBell() {
@@ -54,8 +55,6 @@ export default function NotificationBell() {
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
-
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/matches'
 
   useEffect(() => {
     let ws: WebSocket | null = null

@@ -110,10 +110,13 @@ def import_results_csv(csv_path: str = None) -> int:
             else:
                 partido = Partido(
                     fixture_id_externo=fixture_id,
-                    fuente_origen="csv_historico",
+                    fuente_origen="csv_historical",
+                    tipo_dato="historico",
                     hash_dedupe=hash_dedupe,
                     fecha_utc=row["date"],
                     torneo_id=torneo_id,
+                    home_team=home,
+                    away_team=away,
                     equipo_local_id=home_id,
                     equipo_visitante_id=away_id,
                     goles_local=int(row["home_score"]),

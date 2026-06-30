@@ -6,6 +6,7 @@ numpy>=1.24.0
 # Database
 psycopg2-binary>=2.9.0
 sqlalchemy>=2.0.0
+alembic>=1.13.0
 
 # Model training
 scipy>=1.10.0

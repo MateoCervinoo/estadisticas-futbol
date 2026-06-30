@@ -1,8 +1,19 @@
 "use client"
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { getPartidos, getPartidoEstadisticas, getPartidoFilterMetadata, Partido, PartidoEstadisticas } from '../src/services/api'
+import {
+  getPartidos,
+  getPartidoEstadisticas,
+  getPartidoFilterMetadata,
+  getPartidoPrediccion,
+  Partido,
+  PartidoEstadisticas,
+  PredictionResponse,
+  WS_URL,
+} from '../src/services/api'
 import { getFavorites, toggleFavorite } from '../src/services/favorites'
+import FootballLoader from '../components/FootballLoader'
+import StatRow from '../components/StatRow'
 
 type ExactScore = {
   home: number
@@ -46,41 +57,6 @@ const TOURNAMENT_LABELS: Record<string, string> = {
   WORLD_CUP: 'Mundial',
 }
 
-const StatRow = ({ label, home, away, fmt = 'int' }: { label: string; home: number; away: number; fmt?: 'int' | 'float' | 'pct' }) => {
-  const fmtVal = (v: number) => {
-    if (fmt === 'pct') return `${Math.round(v)}%`
-    if (fmt === 'float') return v.toFixed(2)
-    return String(Math.round(v))
-  }
-  const total = home + away
-  const homePct = total > 0 ? (home / total) * 100 : 50
-  const homeBar = homePct < 10 ? 10 : homePct > 90 ? 90 : homePct
-  const awayBar = 100 - homeBar
-  return (
-    <div>
-      <div className="d-flex justify-content-between small mb-1">
-        <span className="fw-semibold">{fmtVal(home)}</span>
-        <span className="text-muted">{label}</span>
-        <span className="fw-semibold">{fmtVal(away)}</span>
-      </div>
-      <div className="progress" style={{ height: 6 }}>
-        <div className="progress-bar bg-success" style={{ width: `${homeBar}%` }} />
-        <div className="progress-bar bg-danger" style={{ width: `${awayBar}%` }} />
-      </div>
-    </div>
-  )
-}
-
-const FootballLoader = () => (
-  <div className="football-loader my-4" role="status" aria-live="polite">
-    <div className="football-loader-field">
-      <div className="football-loader-ball" />
-      <div className="football-loader-shadow" />
-    </div>
-    <div className="small text-muted text-center mt-2">Cargando partidos...</div>
-  </div>
-)
-
 const STAGE_LABELS: Record<string, string> = {
   GROUP_STAGE: 'Fase de Grupos',
   LAST_32: 'Dieciseisavos de Final',
@@ -117,7 +93,7 @@ export default function Home() {
   const [showFilters, setShowFilters] = useState<boolean>(false)
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [modalMode, setModalMode] = useState<'simulate' | 'detail' | null>(null)
-  const [prediction, setPrediction] = useState<any | null>(null)
+  const [prediction, setPrediction] = useState<PredictionResponse | null>(null)
   const [predLoading, setPredLoading] = useState<boolean>(false)
   const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
   const [statsLoading, setStatsLoading] = useState<boolean>(false)
@@ -246,7 +222,6 @@ export default function Home() {
   }, [])
 
   // WebSocket connection to re-fetch on live notifications
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/matches'
   const matchFiltersRef = useRef({
     hasActiveServerFilters,
     selectedYear,
@@ -293,7 +268,7 @@ export default function Home() {
             }).then((data) => {
               if (data) setPartidos(data)
             }).catch(() => {})
-            const pid = msg.data?.partido_id
+            const pid = Number(msg.data?.partido_id)
             if (pid && getFavorites().includes(pid)) {
               setToasts((prev) => [...prev, { id: Date.now(), msg: `⭐ ${msg.data.mensaje}` }])
             } else if (pid) {
@@ -402,11 +377,11 @@ export default function Home() {
     return rawGroup.replace('GROUP_', 'Grupo ')
   }
 
-  const topExactScores = (predictionData: any): ExactScore[] => {
+  const topExactScores = (predictionData: PredictionResponse | null): ExactScore[] => {
     if (Array.isArray(predictionData?.score_matrix_flat)) {
       return predictionData.score_matrix_flat
-        .filter((item: any) => Number.isFinite(Number(item?.prob)))
-        .map((item: any) => ({
+        .filter((item) => Number.isFinite(Number(item?.prob)))
+        .map((item) => ({
           home: Number(item.home),
           away: Number(item.away),
           prob: Number(item.prob),
@@ -432,10 +407,10 @@ export default function Home() {
       .slice(0, 3)
   }
 
-  const exactScoreMatrix = (predictionData: any): number[][] => {
+  const exactScoreMatrix = (predictionData: PredictionResponse | null): number[][] => {
     if (!Array.isArray(predictionData?.score_matrix)) return []
 
-    return predictionData.score_matrix.slice(0, 5).map((row: any[]) =>
+    return predictionData.score_matrix.slice(0, 5).map((row) =>
       Array.isArray(row)
         ? row.slice(0, 5).map((cell) => {
             const value = Number(cell)
@@ -573,16 +548,8 @@ export default function Home() {
       if (!selectedMatch || modalMode !== 'simulate') return
       setPredLoading(true)
       try {
-        // Use explicit backend base URL so client fetches hit the FastAPI server
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-        const res = await fetch(`${baseUrl}/api/partidos/${selectedMatch.fixture_id}/prediccion`)
-        if (!mounted) return
-        if (!res.ok) {
-          setPrediction(null)
-          setPredLoading(false)
-          return
-        }
-        const data = await res.json()
+        if (selectedMatch.fixture_id === null || selectedMatch.fixture_id === undefined) return
+        const data = await getPartidoPrediccion(selectedMatch.fixture_id)
         if (!mounted) return
         setPrediction(data)
       } catch (err) {
