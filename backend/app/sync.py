@@ -17,8 +17,17 @@ from sqlmodel import Session, select
 from .api_client import APIFootballClient
 from .models import Partido, PartidoEstadisticas, Notificacion
 from .database import engine, init_db
-from .data_mapper import normalize_status, normalize_tournament
-from hashlib import md5
+from .data_mapper import normalize_status
+from .services.data_normalization_service import (
+    build_hash_dedupe,
+    canonical_team_name,
+    canonical_tournament_name,
+    classify_tipo_dato,
+    find_partido_for_upsert,
+    resolve_equipo_id,
+    resolve_torneo_id,
+    validate_partido_values,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -39,46 +48,6 @@ CLUB_COMPETITIONS = {
 # Últimas 3 temporadas disponibles en free tier (football-data.org)
 # Junio 2026 -> season 2023, 2024, 2025
 CLUB_SEASONS = [2023, 2024, 2025]
-
-
-def _resolve_torneo_id(session: Session, torneo_name: str, tournament: str) -> Optional[int]:
-    from .models import Torneo
-
-    names = [torneo_name, tournament]
-    if torneo_name in ("FIFA World Cup", "World Cup", "Mundial") or tournament in ("FIFA World Cup", "World Cup", "Mundial"):
-        names.extend(["FIFA World Cup", "World Cup", "Mundial"])
-
-    for name in names:
-        if not name:
-            continue
-        torneo = session.exec(
-            select(Torneo).where(Torneo.nombre_canonico == name)
-        ).first()
-        if torneo:
-            return torneo.id
-
-    if any("world cup" in str(name).lower() or "mundial" in str(name).lower() for name in names):
-        torneo = session.exec(
-            select(Torneo).where(
-                Torneo.nombre_canonico.ilike("%world cup%")
-            )
-        ).first() or session.exec(
-            select(Torneo).where(Torneo.nombre_canonico.ilike("%mundial%"))
-        ).first()
-        if torneo:
-            return torneo.id
-
-    category = "club" if torneo_name in CLUB_COMPETITIONS.values() else "seleccion"
-    tipo = "mundial" if any("world cup" in str(name).lower() or "mundial" in str(name).lower() for name in names) else ("liga" if category == "club" else "otro")
-    torneo = Torneo(
-        nombre_canonico=torneo_name or tournament,
-        nombre_api=tournament or torneo_name,
-        tipo=tipo,
-        categoria=category,
-    )
-    session.add(torneo)
-    session.flush()
-    return torneo.id
 
 
 def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
@@ -147,8 +116,8 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
 
     torneo_name = f.get('torneo_name', 'FIFA World Cup')
     date = _parse_datetime(f.get('date'))
-    home_team = f.get('home_team')
-    away_team = f.get('away_team')
+    home_team = canonical_team_name(f.get('home_team'))
+    away_team = canonical_team_name(f.get('away_team'))
     goals_home = f.get('goals_home')
     goals_away = f.get('goals_away')
     ht_goals_home = f.get('ht_goals_home')
@@ -160,58 +129,34 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
     away_crest_url = f.get('away_crest_url')
     raw_status = f.get('status')
     status = normalize_status(raw_status, source="api")
-    tournament = normalize_tournament(f.get('tournament')) or torneo_name
-
-    from .models import Equipo
-
-    # Resolver torneo_id
-    try:
-        torneo_id = _resolve_torneo_id(session, torneo_name, tournament)
-    except Exception:
-        torneo_id = None
-
-    # Generar hash_dedupe para cross-source dedup
-    date_str = date.strftime("%Y-%m-%d") if date else ""
-    hash_key = f"{date_str}|{(home_team or '').lower().strip()}|{(away_team or '').lower().strip()}|{tournament.lower().strip()}"
-    hash_dedupe = md5(hash_key.encode("utf-8")).hexdigest()
-
+    tournament = canonical_tournament_name(f.get('tournament') or torneo_name)
     category = "club" if torneo_name in CLUB_COMPETITIONS.values() else "seleccion"
 
-    def resolve_api_team_id(name: Optional[str]) -> Optional[int]:
-        clean_name = str(name).strip() if name else ""
-        if not clean_name:
-            return None
+    try:
+        torneo_id = resolve_torneo_id(session, tournament or torneo_name, category)
+    except Exception:
+        logger.exception("No se pudo resolver torneo para fixture_id=%s", fixture_id)
+        torneo_id = None
 
-        equipo = session.exec(select(Equipo).where(Equipo.nombre_api == clean_name)).first()
-        if not equipo:
-            equipo = session.exec(select(Equipo).where(Equipo.nombre_canonico == clean_name)).first()
-        if not equipo:
-            equipo = session.exec(select(Equipo).where(Equipo.nombre_csv == clean_name)).first()
-        if not equipo:
-            equipo = Equipo(
-                nombre_canonico=clean_name,
-                nombre_api=clean_name,
-                tipo=category,
-            )
-            session.add(equipo)
-            session.flush()
-        elif not equipo.nombre_api:
-            equipo.nombre_api = clean_name
-            session.add(equipo)
-            session.flush()
+    hash_dedupe = build_hash_dedupe(date, home_team, away_team, tournament)
 
-        return equipo.id
+    home_team_id = resolve_equipo_id(session, home_team, "nombre_api", category)
+    away_team_id = resolve_equipo_id(session, away_team, "nombre_api", category)
+    validation_errors = validate_partido_values(date, home_team, away_team, home_team_id, away_team_id, torneo_id, fixture_id, hash_dedupe)
+    if validation_errors:
+        msg = f"Fixture inválido fixture_id={fixture_id}: {','.join(validation_errors)}"
+        logger.warning(msg)
+        errors.append(msg)
+        return
 
-    home_team_id = resolve_api_team_id(home_team)
-    away_team_id = resolve_api_team_id(away_team)
+    existing, conflict = find_partido_for_upsert(session, fixture_id, hash_dedupe)
+    if conflict:
+        msg = f"Conflicto fixture_id/hash_dedupe fixture_id={fixture_id} hash={hash_dedupe}"
+        logger.warning(msg)
+        errors.append(msg)
+        return
 
-    # Buscar por fixture_id o hash_dedupe
-    stmt = select(Partido).where(Partido.fixture_id == fixture_id)
-    existing = session.exec(stmt).first()
-    if not existing and hash_dedupe:
-        existing = session.exec(
-            select(Partido).where(Partido.hash_dedupe == hash_dedupe)
-        ).first()
+    tipo_dato = classify_tipo_dato("api_football_data", status, date)
 
     try:
         if not existing:
@@ -219,8 +164,9 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 fixture_id=fixture_id,
                 hash_dedupe=hash_dedupe,
                 fuente_origen="api_football_data",
+                tipo_dato=tipo_dato,
                 torneo_id=torneo_id,
-                fecha_utc=date or datetime.now(timezone.utc),
+                fecha_utc=date,
                 home_team=home_team or "",
                 away_team=away_team or "",
                 equipo_local_id=home_team_id,
@@ -294,6 +240,10 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
             ):
                 existing.goles_local = goals_home
                 existing.goles_visitante = goals_away
+                existing.fixture_id = fixture_id
+                existing.hash_dedupe = hash_dedupe
+                existing.fuente_origen = "api_football_data"
+                existing.tipo_dato = tipo_dato
                 existing.goles_local_ht = ht_goals_home
                 existing.goles_visitante_ht = ht_goals_away
                 existing.estado = status

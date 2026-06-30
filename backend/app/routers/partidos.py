@@ -10,6 +10,12 @@ from sqlmodel import select
 from ..database import engine
 from ..db.session import Session
 from ..models import Equipo, Partido, PartidoEstadisticas, Torneo
+from ..services.data_quality_service import (
+    DEFAULT_BAD_RECORDS_PATH,
+    build_data_quality_report,
+    purge_invalid_placeholder_fixtures,
+    repair_partido_identity,
+)
 from ..services.partido_service import dedupe_partido_items, enrich_partido_item, season_bounds
 from ..services.prediction_service import predict_partido
 
@@ -155,9 +161,9 @@ def api_partidos_live():
 
 @router.get("/api/debug/datos-corruptos")
 def debug_datos_corruptos():
+    build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
     bad_path = os.path.join(os.path.dirname(__file__), "..", "data", "bad_records.csv")
-    alt_path = os.path.join("/", "app", "data", "bad_records.csv")
-    chosen = bad_path if os.path.exists(bad_path) else alt_path if os.path.exists(alt_path) else None
+    chosen = DEFAULT_BAD_RECORDS_PATH if os.path.exists(DEFAULT_BAD_RECORDS_PATH) else bad_path if os.path.exists(bad_path) else None
     if not chosen:
         return {"warning": "No se encontró bad_records.csv"}
     try:
@@ -167,3 +173,27 @@ def debug_datos_corruptos():
     except Exception:
         logger.exception("Error leyendo %s", chosen)
         raise HTTPException(status_code=500, detail="No se pudo leer el archivo de registros corruptos")
+
+
+@router.get("/api/debug/reporte-datos")
+def debug_reporte_datos(include_records: bool = False):
+    report = build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
+    if not include_records:
+        report.pop("records", None)
+    return report
+
+
+@router.post("/api/debug/reparar-identidad-partidos")
+def debug_reparar_identidad_partidos(dry_run: bool = True):
+    result = repair_partido_identity(dry_run=dry_run)
+    if not dry_run:
+        build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
+    return result
+
+
+@router.post("/api/debug/purgar-fixtures-invalidos")
+def debug_purgar_fixtures_invalidos(dry_run: bool = True):
+    result = purge_invalid_placeholder_fixtures(dry_run=dry_run)
+    if not dry_run:
+        build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
+    return result

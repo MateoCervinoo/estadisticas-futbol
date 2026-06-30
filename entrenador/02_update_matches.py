@@ -138,12 +138,16 @@ def _process_matches(matches, fuente: str, mapper, league_config, session) -> in
                 existing.home_crest_url = home_crest
                 existing.away_crest_url = away_crest
                 existing.torneo_id = torneo_id
+                existing.fixture_id = fixture_id if isinstance(fixture_id, int) else existing.fixture_id
+                existing.fixture_id_externo = str(fixture_id) if fixture_id else existing.fixture_id_externo
+                existing.tipo_dato = "fixture" if status in {"NS", "TIMED"} else "api_sync"
                 existing.updated_at = datetime.now(timezone.utc)
         else:
             partido = Partido(
-                fixture_id=str(fixture_id) if isinstance(fixture_id, int) else None,
+                fixture_id=fixture_id if isinstance(fixture_id, int) else None,
                 fixture_id_externo=str(fixture_id) if fixture_id else None,
                 fuente_origen=fuente,
+                tipo_dato="fixture" if status in {"NS", "TIMED"} else "api_sync",
                 hash_dedupe=hash_dedupe,
                 fecha_utc=_parse_date(date_str),
                 torneo_id=torneo_id,

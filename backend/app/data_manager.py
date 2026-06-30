@@ -3,11 +3,20 @@ import pandas as pd
 from sqlmodel import Session, select
 # Importamos el engine de tu base de datos para cuando sumemos los partidos en vivo
 from app.database import engine
-from app.models import Partido, Equipo, Torneo
-from app.data_mapper import normalize_tournament, normalize_status
-import hashlib
+from app.models import Partido, Equipo
+from app.data_mapper import normalize_status
 import logging
 import numpy as np
+from app.services.data_normalization_service import (
+    build_hash_dedupe,
+    canonical_team_name,
+    canonical_tournament_name,
+    classify_tipo_dato,
+    find_partido_for_upsert,
+    resolve_equipo_id,
+    resolve_torneo_id,
+    validate_partido_values,
+)
 
 logger = logging.getLogger(__name__)
 MUNDIAL_2026_START = "2026-06-11"
@@ -219,7 +228,7 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     # Minimizar columnas tratadas; asegurarnos de que exista 'tournament'
     if 'tournament' not in df.columns:
         # Fallback: el CSV debería tener columna tournament, pero si falta,
-        # normalize_tournament('') devuelve 'Amistoso'
+        # canonical_tournament_name('') devuelve 'Otro'.
         df['tournament'] = ''
 
     world_cup_mask = df["tournament"].astype(str).str.lower().str.contains("world cup|mundial", na=False)
@@ -236,21 +245,16 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce").fillna(0).astype(int)
     df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce").fillna(0).astype(int)
 
-    # Generar fixture_id determinístico usando md5 sobre fecha+equipos+torneo
-    def make_fixture_id(row):
-        tournament = row.get('tournament', '')
-        key = f"{row['date'].isoformat()}|{row['home_team']}|{row['away_team']}|{tournament}"
-        md = hashlib.md5(key.encode("utf-8")).hexdigest()
-        # Reducir a rango de enteros 32-bit para mayor compatibilidad
-        return int(md, 16) % (2 ** 31 - 1)
-
     def make_hash_dedupe(row):
-        tournament = normalize_tournament(row.get('tournament'))
-        key = f"{row['date'].strftime('%Y-%m-%d')}|{str(row['home_team']).lower().strip()}|{str(row['away_team']).lower().strip()}|{str(tournament).lower().strip()}"
-        return hashlib.md5(key.encode("utf-8")).hexdigest()
+        return build_hash_dedupe(
+            row["date"],
+            row.get("home_team"),
+            row.get("away_team"),
+            row.get("tournament"),
+        )
 
-    df["fixture_id"] = df.apply(make_fixture_id, axis=1)
     df["hash_dedupe"] = df.apply(make_hash_dedupe, axis=1)
+    df["fixture_id_externo"] = df["hash_dedupe"]
 
     total = len(df)
     logger.info("Iniciando ingesta de %d partidos históricos (desde %d)", total, since_year)
@@ -258,78 +262,36 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     # Upsert por batches
     inserted = 0
     with Session(engine) as session:
-        team_cache: dict[str, int] = {}
-        torneo_cache: dict[str, int] = {}
-
-        def resolve_team_id(name: str) -> int | None:
-            clean_name = str(name).strip()
-            if not clean_name:
-                return None
-            cache_key = clean_name.casefold()
-            if cache_key in team_cache:
-                return team_cache[cache_key]
-
-            equipo = session.exec(select(Equipo).where(Equipo.nombre_csv == clean_name)).first()
-            if not equipo:
-                equipo = session.exec(select(Equipo).where(Equipo.nombre_canonico == clean_name)).first()
-            if not equipo:
-                equipo = Equipo(
-                    nombre_canonico=clean_name,
-                    nombre_csv=clean_name,
-                    tipo="seleccion",
-                )
-                session.add(equipo)
-                session.flush()
-
-            team_cache[cache_key] = equipo.id
-            return equipo.id
-
-        def resolve_torneo_id(raw_name: str) -> int | None:
-            torneo_name = normalize_tournament(raw_name)
-            if not torneo_name:
-                return None
-            cache_key = torneo_name.casefold()
-            if cache_key in torneo_cache:
-                return torneo_cache[cache_key]
-
-            torneo = session.exec(select(Torneo).where(Torneo.nombre_canonico == torneo_name)).first()
-            if not torneo:
-                tipo = "mundial" if torneo_name == "Mundial" else "otro"
-                torneo = Torneo(
-                    nombre_canonico=torneo_name,
-                    nombre_api=str(raw_name).strip() or torneo_name,
-                    tipo=tipo,
-                    categoria="seleccion",
-                )
-                session.add(torneo)
-                session.flush()
-
-            torneo_cache[cache_key] = torneo.id
-            return torneo.id
-
         for idx, row in df.iterrows():
-            fid = int(row["fixture_id"])
             hash_dedupe = row["hash_dedupe"]
             tournament = row.get("tournament")
-            tournament_name = normalize_tournament(tournament)
-            home_team_id = resolve_team_id(row["home_team"])
-            away_team_id = resolve_team_id(row["away_team"])
-            torneo_id = resolve_torneo_id(tournament)
+            tournament_name = canonical_tournament_name(tournament)
+            home_team = canonical_team_name(row["home_team"])
+            away_team = canonical_team_name(row["away_team"])
+            home_team_id = resolve_equipo_id(session, home_team, "nombre_csv", "seleccion")
+            away_team_id = resolve_equipo_id(session, away_team, "nombre_csv", "seleccion")
+            torneo_id = resolve_torneo_id(session, tournament, "seleccion")
+            validation_errors = validate_partido_values(row["date"], home_team, away_team, home_team_id, away_team_id, torneo_id, None, hash_dedupe)
+            if validation_errors:
+                logger.warning("Fila histórica inválida idx=%s hash=%s: %s", idx, hash_dedupe, ",".join(validation_errors))
+                continue
 
-            # Buscar partido existente por fixture_id o hash_dedupe para evitar duplicados cross-source
-            existing = session.exec(select(Partido).where(Partido.fixture_id == fid)).first()
-            if not existing:
-                existing = session.exec(select(Partido).where(Partido.hash_dedupe == hash_dedupe)).first()
+            existing, conflict = find_partido_for_upsert(session, None, hash_dedupe)
+            if conflict:
+                logger.warning("Conflicto histórico fixture/hash idx=%s hash=%s", idx, hash_dedupe)
+                continue
+
+            tipo_dato = classify_tipo_dato("csv_historical", normalize_status("FINISHED", source="csv"), row["date"])
             if existing:
                 existing.fecha_utc = row["date"]
-                existing.home_team = row["home_team"]
-                existing.away_team = row["away_team"]
+                existing.home_team = home_team
+                existing.away_team = away_team
                 existing.goles_local = int(row["home_score"]) if pd.notna(row["home_score"]) else None
                 existing.goles_visitante = int(row["away_score"]) if pd.notna(row["away_score"]) else None
                 existing.estado = normalize_status("FINISHED", source="csv")
-                if 'tournament' in row.index:
-                    existing.tournament = normalize_tournament(row.get('tournament'))
                 existing.hash_dedupe = hash_dedupe
+                existing.fixture_id_externo = row["fixture_id_externo"]
+                existing.tipo_dato = tipo_dato
                 if home_team_id is not None:
                     existing.equipo_local_id = home_team_id
                 if away_team_id is not None:
@@ -340,16 +302,18 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                 session.add(existing)
             else:
                 nuevo = Partido(
-                    fixture_id=fid,
+                    fixture_id=None,
+                    fixture_id_externo=row["fixture_id_externo"],
                     fecha_utc=row["date"],
-                    home_team=row["home_team"],
-                    away_team=row["away_team"],
+                    home_team=home_team,
+                    away_team=away_team,
                     equipo_local_id=home_team_id,
                     equipo_visitante_id=away_team_id,
                     goles_local=int(row["home_score"]) if pd.notna(row["home_score"]) else None,
                     goles_visitante=int(row["away_score"]) if pd.notna(row["away_score"]) else None,
                     estado=normalize_status("FINISHED", source="csv"),
                     fuente_origen="csv_historical",
+                    tipo_dato=tipo_dato,
                     hash_dedupe=hash_dedupe,
                     torneo_id=torneo_id,
                     tournament=tournament_name,

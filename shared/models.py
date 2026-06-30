@@ -74,6 +74,7 @@ class Partido(SQLModel, table=True):
     # --- From entrenador CSV ---
     fixture_id_externo: Optional[str] = Field(default=None, max_length=50)
     fuente_origen: str = Field(max_length=30)
+    tipo_dato: str = Field(default="historico", max_length=20)
     hash_dedupe: Optional[str] = Field(default=None, unique=True, index=True, max_length=32)
 
     fecha_utc: datetime
