@@ -2,16 +2,17 @@ import datetime
 import logging
 from typing import Optional
 
-from sqlmodel import Session
+from sqlalchemy import func, or_
+from sqlmodel import Session, select
 
 
-from ..models import Equipo, Partido
+from ..models import Equipo, Partido, Torneo
 
 logger = logging.getLogger(__name__)
 
 
 def enrich_partido_item(p: Partido, session: Session) -> dict:
-    item = p.dict()
+    item = p.model_dump()
 
     field_map = {
         "date": "fecha_utc",
@@ -51,26 +52,38 @@ def enrich_partido_item(p: Partido, session: Session) -> dict:
 def dedupe_partido_items(items: list[dict]) -> list[dict]:
     by_key: dict[str, dict] = {}
     for item in items:
-        raw_date = item.get("date") or item.get("fecha_utc") or ""
-        date_key = str(raw_date)[:10]
-        tournament = str(item.get("tournament") or "").strip().casefold()
-        home = str(item.get("home_team") or item.get("home_nombre_es") or "").strip().casefold()
-        away = str(item.get("away_team") or item.get("away_nombre_es") or "").strip().casefold()
-        key = "|".join([date_key, home, away, tournament])
+        key = partido_dedupe_key(item)
+        if key is None:
+            key = f"record:{item.get('id') or id(item)}"
 
         current = by_key.get(key)
         if current is None:
             by_key[key] = item
             continue
 
-        current_has_fixture = current.get("fixture_id") is not None
-        item_has_fixture = item.get("fixture_id") is not None
-        current_has_media = bool(current.get("home_crest_url") or current.get("away_crest_url"))
-        item_has_media = bool(item.get("home_crest_url") or item.get("away_crest_url"))
-        if (item_has_fixture and not current_has_fixture) or (item_has_media and not current_has_media):
+        if partido_dedupe_priority(item) > partido_dedupe_priority(current):
             by_key[key] = item
 
     return list(by_key.values())
+
+
+def partido_dedupe_key(item: dict) -> str | None:
+    raw_date = item.get("date") or item.get("fecha_utc") or ""
+    date_key = str(raw_date)[:10]
+    tournament = str(item.get("tournament") or "").strip().casefold()
+    home = str(item.get("home_team") or item.get("home_nombre_es") or "").strip().casefold()
+    away = str(item.get("away_team") or item.get("away_nombre_es") or "").strip().casefold()
+    if not date_key or not home or not away or not tournament:
+        return None
+    return "|".join([date_key, home, away, tournament])
+
+
+def partido_dedupe_priority(item: dict) -> tuple[int, int, int, int]:
+    has_fixture = int(item.get("fixture_id") is not None)
+    has_media = int(bool(item.get("home_crest_url") or item.get("away_crest_url")))
+    has_score = int(item.get("home_score") is not None and item.get("away_score") is not None)
+    record_id = int(item.get("id") or 0)
+    return has_fixture, has_media, has_score, record_id
 
 
 def season_bounds(
@@ -86,6 +99,62 @@ def season_bounds(
     if year is not None:
         return datetime.datetime(year, 1, 1), datetime.datetime(year + 1, 1, 1)
     return None, None
+
+
+def build_partido_filter_conditions(
+    session: Session,
+    mundial: bool = False,
+    proximos: bool = False,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    torneo_id: Optional[int] = None,
+    tournament: Optional[str] = None,
+    stage: Optional[str] = None,
+    group: Optional[str] = None,
+    matchday: Optional[int] = None,
+    date: Optional[str] = None,
+) -> list:
+    conditions = []
+
+    if mundial:
+        torneos = session.exec(
+            select(Torneo).where(or_(Torneo.nombre_canonico.ilike("%world cup%"), Torneo.nombre_canonico.ilike("%mundial%")))
+        ).all()
+        torneo_ids = [t.id for t in torneos if t.id is not None]
+        mundial_conditions = []
+        if torneo_ids:
+            mundial_conditions.append(Partido.torneo_id.in_(torneo_ids))
+        mundial_conditions.append(Partido.tournament.ilike("%world cup%"))
+        mundial_conditions.append(Partido.tournament.ilike("%mundial%"))
+        conditions.append(or_(*mundial_conditions))
+
+    if proximos:
+        conditions.append(Partido.estado.in_(["NS", "TIMED"]))
+
+    if year is not None:
+        start, end = season_bounds(year=year)
+        if start and end:
+            conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
+
+    if season:
+        start, end = season_bounds(season=season)
+        if start and end:
+            conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
+
+    if torneo_id is not None:
+        conditions.append(Partido.torneo_id == torneo_id)
+    if tournament:
+        conditions.append(Partido.tournament == tournament)
+    if stage:
+        conditions.append(Partido.etapa == stage)
+    if group:
+        conditions.append(Partido.grupo == group)
+    if matchday is not None:
+        conditions.append(Partido.jornada == matchday)
+    if date:
+        conditions.append(func.date(Partido.fecha_utc) == date)
+
+    return conditions
 
 
 def season_label_for_match(match_date: datetime.datetime, tournament_type: str | None = None) -> str:

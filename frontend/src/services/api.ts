@@ -49,6 +49,12 @@ async function safeJson(response: Response) {
   }
 }
 
+async function assertOk(response: Response, label: string) {
+  if (response.ok) return
+  const body = await response.text()
+  throw new Error(`${label}: ${response.status} ${response.statusText}${body ? ` - ${body}` : ''}`)
+}
+
 export interface PartidoFilters {
   year?: number
   season?: string
@@ -118,8 +124,12 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
     const params = new URLSearchParams()
     if (filters?.year !== undefined) params.set('year', String(filters.year))
     if (filters?.season) params.set('season', filters.season)
+    if (filters?.torneo_id !== undefined) params.set('torneo_id', String(filters.torneo_id))
     if (filters?.tournament) params.set('tournament', filters.tournament)
     if (filters?.stage) params.set('stage', filters.stage)
+    if (filters?.group) params.set('group', filters.group)
+    if (filters?.matchday !== undefined) params.set('matchday', String(filters.matchday))
+    if (filters?.date) params.set('date', filters.date)
     const query = params.toString()
     const res = await fetch(`${BASE_URL}/partidos/filtros${query ? `?${query}` : ''}`)
     if (!res.ok) {
@@ -293,48 +303,42 @@ export interface Comparacion {
 
 export async function getTorneos(): Promise<Torneo[]> {
   const res = await fetch(`${BASE_URL}/torneos`)
-  if (!res.ok) return []
+  await assertOk(res, 'Failed to fetch torneos')
   return safeJson(res)
 }
 
 export async function getTablaPosiciones(
   torneoId: number,
   filters?: { year?: number; season?: string; grouped?: boolean }
-): Promise<{ torneo: string; tipo: string; tabla: TablaRow[]; grupos?: TablaGrupo[] } | null> {
-  try {
-    const params = new URLSearchParams()
-    if (filters?.year !== undefined) params.set('year', String(filters.year))
-    if (filters?.season) params.set('season', filters.season)
-    if (filters?.grouped) params.set('grouped', 'true')
-    const query = params.toString()
-    const res = await fetch(`${BASE_URL}/torneos/${torneoId}/tabla-posiciones${query ? `?${query}` : ''}`)
-    if (!res.ok) return null
-    return safeJson(res)
-  } catch { return null }
+): Promise<{ torneo: string; tipo: string; tabla: TablaRow[]; grupos?: TablaGrupo[] }> {
+  const params = new URLSearchParams()
+  if (filters?.year !== undefined) params.set('year', String(filters.year))
+  if (filters?.season) params.set('season', filters.season)
+  if (filters?.grouped) params.set('grouped', 'true')
+  const query = params.toString()
+  const res = await fetch(`${BASE_URL}/torneos/${torneoId}/tabla-posiciones${query ? `?${query}` : ''}`)
+  await assertOk(res, 'Failed to fetch tabla de posiciones')
+  return safeJson(res)
 }
 
 export async function getBracket(
   torneoId: number,
   filters?: { year?: number; season?: string }
-): Promise<{ torneo: string; bracket: BracketRound[] } | null> {
-  try {
-    const params = new URLSearchParams()
-    if (filters?.year !== undefined) params.set('year', String(filters.year))
-    if (filters?.season) params.set('season', filters.season)
-    const query = params.toString()
-    const res = await fetch(`${BASE_URL}/torneos/${torneoId}/bracket${query ? `?${query}` : ''}`)
-    if (!res.ok) return null
-    return safeJson(res)
-  } catch { return null }
+): Promise<{ torneo: string; bracket: BracketRound[] }> {
+  const params = new URLSearchParams()
+  if (filters?.year !== undefined) params.set('year', String(filters.year))
+  if (filters?.season) params.set('season', filters.season)
+  const query = params.toString()
+  const res = await fetch(`${BASE_URL}/torneos/${torneoId}/bracket${query ? `?${query}` : ''}`)
+  await assertOk(res, 'Failed to fetch bracket')
+  return safeJson(res)
 }
 
 export async function getTorneoTemporadas(torneoId: number): Promise<string[]> {
-  try {
-    const res = await fetch(`${BASE_URL}/torneos/${torneoId}/temporadas`)
-    if (!res.ok) return []
-    const data = await safeJson(res)
-    return Array.isArray(data.temporadas) ? data.temporadas : []
-  } catch { return [] }
+  const res = await fetch(`${BASE_URL}/torneos/${torneoId}/temporadas`)
+  await assertOk(res, 'Failed to fetch temporadas')
+  const data = await safeJson(res)
+  return Array.isArray(data.temporadas) ? data.temporadas : []
 }
 
 export async function getEquipoPerfil(equipoId: number): Promise<EquipoPerfil | null> {
