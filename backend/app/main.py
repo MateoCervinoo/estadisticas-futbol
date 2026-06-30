@@ -5,10 +5,10 @@ import logging
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session, select, SQLModel
+from sqlmodel import Session, select
 from sqlalchemy import or_, and_, func
 
-from .database import engine, ensure_partido_columns
+from .database import engine, init_db
 from .models import Partido, Equipo, PartidoEstadisticas, Notificacion, Torneo
 from .dixoncoles import predict_match, predict_exact_score_matrix, load_model_json, select_model_for_match
 from .sync import sync_fixtures_and_metrics
@@ -79,9 +79,8 @@ app = FastAPI(title="Estadisticas Futbol - Backend")
 def on_startup():
     # Crear tablas en la base de datos (requerimiento explícito)
     try:
-        SQLModel.metadata.create_all(engine)
-        ensure_partido_columns()
-        logger.info("Tablas creadas/confirmadas en la base de datos")
+        init_db()
+        logger.info("Migraciones de base de datos aplicadas/confirmadas")
     except Exception:
         logger.exception("Fallo creando tablas en la base de datos al startup. Continuando...")
 

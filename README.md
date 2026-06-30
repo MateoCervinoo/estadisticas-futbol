@@ -92,6 +92,25 @@ El script `actualizar_partidos.py` sincroniza partidos, estados y goles desde la
 - `data/`: archivos compartidos por volumen Docker
 - `source/`: assets, incluyendo el logo principal
 
+## Archivos fuente y derivados
+
+Se consideran fuente del proyecto:
+
+- Código de `backend/`, `frontend/`, `entrenador/` y `shared/`
+- Migraciones de `backend/alembic/`
+- Datos base versionables de `data/`, como CSV y parámetros de modelo necesarios para desarrollo
+- Assets de `source/` y `frontend/public/`
+- Configuración reproducible: `docker-compose.yml`, `Dockerfile`, `Makefile`, `package.json`, `requirements.txt`
+
+Se consideran derivados/locales y no deben versionarse:
+
+- Entornos y dependencias: `venv/`, `node_modules/`
+- Builds y cache: `frontend/.next/`, `frontend/.next*/`, `frontend/tsconfig.tsbuildinfo`
+- Cache Python: `__pycache__/`, `*.pyc`
+- Logs: `*.log`
+- Secretos/local config: `.env`, `.env.*`, `entrenador/.env`
+- Archivos privados o temporales: `archivos-privados/`, `downloaded_files/`, `session-*.md`
+
 ## Levantar el proyecto
 
 ```bash
@@ -100,3 +119,21 @@ docker compose up --build -d
 
 Frontend: `http://localhost:3000`  
 Backend: `http://localhost:8000`
+
+## Base de datos
+
+El esquema de la base se gestiona con Alembic desde `backend/alembic`.
+
+Aplicar migraciones:
+
+```bash
+docker compose run --rm backend alembic upgrade head
+```
+
+Reset controlado de la DB local:
+
+```bash
+make -C backend reset-db CONFIRM=reset
+```
+
+El reset borra el volumen local de PostgreSQL y recrea el esquema desde las migraciones. Usarlo solo cuando los datos puedan regenerarse desde scripts, CSV o sincronización externa.

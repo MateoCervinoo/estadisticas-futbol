@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 
 from .api_client import APIFootballClient
 from .models import Partido, PartidoEstadisticas, Notificacion
-from .database import engine, init_db, ensure_partido_columns
+from .database import engine, init_db
 from .data_mapper import normalize_status, normalize_tournament
 from hashlib import md5
 
@@ -361,7 +361,6 @@ def sync_fixtures_and_metrics() -> Dict[str, Any]:
 
     Retorna un resumen con conteos y listas de fixtures procesados.
     """
-    ensure_partido_columns()
     client = APIFootballClient()
 
     created: List[int] = []
