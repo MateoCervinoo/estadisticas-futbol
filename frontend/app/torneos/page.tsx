@@ -7,12 +7,25 @@ import { getTorneos, Torneo } from '../../src/services/api'
 export default function TorneosPage() {
   const [torneos, setTorneos] = useState<Torneo[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    getTorneos().then(data => {
-      setTorneos(data)
-      setLoading(false)
-    })
+    let mounted = true
+    setLoading(true)
+    setError(null)
+    getTorneos()
+      .then(data => {
+        if (!mounted) return
+        setTorneos(data)
+      })
+      .catch((err) => {
+        if (!mounted) return
+        setError(err instanceof Error ? err.message : 'No se pudieron cargar los torneos')
+      })
+      .finally(() => {
+        if (mounted) setLoading(false)
+      })
+    return () => { mounted = false }
   }, [])
 
   const tipoIcon = (tipo: string) => {
@@ -26,7 +39,9 @@ export default function TorneosPage() {
   return (
     <main className="container py-4">
       <h2 className="mb-4">Torneos</h2>
+      {error && <div className="alert alert-danger">{error}</div>}
       {loading && <div className="text-muted">Cargando...</div>}
+      {!loading && !error && torneos.length === 0 && <div className="text-muted">No hay torneos cargados.</div>}
       <div className="row">
         {torneos.map(t => (
           <div key={t.id} className="col-12 col-md-6 col-lg-4 mb-3">

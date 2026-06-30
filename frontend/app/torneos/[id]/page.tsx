@@ -40,6 +40,7 @@ export default function TorneoDetailPage() {
   const [temporadas, setTemporadas] = useState<string[]>([])
   const [selectedSeason, setSelectedSeason] = useState<string>('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('pts')
   const [sortAsc, setSortAsc] = useState(false)
   // detail modal
@@ -48,15 +49,35 @@ export default function TorneoDetailPage() {
   const [statsLoading, setStatsLoading] = useState(false)
 
   useEffect(() => {
-    getTorneoTemporadas(torneoId).then((values) => {
-      setTemporadas(values)
-      setSelectedSeason((current) => current || values[0] || '')
-    })
+    let mounted = true
+    setLoading(true)
+    setError(null)
+    setTemporadas([])
+    setSelectedSeason('')
+    getTorneoTemporadas(torneoId)
+      .then((values) => {
+        if (!mounted) return
+        setTemporadas(values)
+        setSelectedSeason(values[0] || '')
+        if (values.length === 0) setLoading(false)
+      })
+      .catch((err) => {
+        if (!mounted) return
+        setError(err instanceof Error ? err.message : 'No se pudieron cargar las temporadas')
+        setLoading(false)
+      })
+    return () => { mounted = false }
   }, [torneoId])
 
   useEffect(() => {
     if (!selectedSeason) return
+    let mounted = true
     setLoading(true)
+    setError(null)
+    setTabla(null)
+    setTablaGrupos(null)
+    setBracketData(null)
+    setPartidos(null)
     const seasonFilters = /^\d{4}$/.test(selectedSeason)
       ? { year: Number(selectedSeason), grouped: true }
       : { season: selectedSeason, grouped: true }
@@ -68,16 +89,20 @@ export default function TorneoDetailPage() {
       getBracket(torneoId, seasonFilters),
       getPartidos(matchFilters),
     ]).then(([t, b, ps]) => {
-      if (t) {
-        setTabla(t.tabla)
-        setTablaGrupos(t.grupos ?? null)
-        setTorName(t.torneo)
-        setTorTipo(t.tipo)
-      }
-      if (b) setBracketData(b.bracket)
-      if (ps) setPartidos(ps)
-      setLoading(false)
+      if (!mounted) return
+      setTabla(t.tabla)
+      setTablaGrupos(t.grupos ?? null)
+      setTorName(t.torneo)
+      setTorTipo(t.tipo)
+      setBracketData(b.bracket)
+      setPartidos(ps)
+    }).catch((err) => {
+      if (!mounted) return
+      setError(err instanceof Error ? err.message : 'No se pudieron cargar los datos del torneo')
+    }).finally(() => {
+      if (mounted) setLoading(false)
     })
+    return () => { mounted = false }
   }, [torneoId, selectedSeason])
 
   const formatDate = (iso: string) => {
@@ -221,10 +246,12 @@ export default function TorneoDetailPage() {
         ))}
       </ul>
 
+      {error && <div className="alert alert-danger">{error}</div>}
       {loading && <div className="text-muted">Cargando...</div>}
+      {!loading && !error && temporadas.length === 0 && <div className="text-muted text-center py-5">No hay temporadas cargadas para este torneo.</div>}
 
       {/* ──────── TAB: CALENDARIO ──────── */}
-      {!loading && activeTab === 'calendario' && (
+      {!loading && !error && activeTab === 'calendario' && (
         <div>
           {(!partidos || partidos.length === 0) && (
             <div className="text-muted text-center py-5">No hay partidos para este torneo.</div>
@@ -270,7 +297,7 @@ export default function TorneoDetailPage() {
       )}
 
       {/* ──────── TAB: POSICIONES ──────── */}
-      {!loading && activeTab === 'posiciones' && (
+      {!loading && !error && activeTab === 'posiciones' && (
         <div>
           {tablaGrupos && tablaGrupos.length > 0 ? (
             <div className="vstack gap-4">
@@ -291,7 +318,7 @@ export default function TorneoDetailPage() {
       )}
 
       {/* ──────── TAB: ELIMINATORIAS ──────── */}
-      {!loading && activeTab === 'eliminatorias' && (
+      {!loading && !error && activeTab === 'eliminatorias' && (
         <div>
           {(!bracket || bracket.length === 0) && <div className="text-muted text-center py-5">No hay eliminatorias para este torneo.</div>}
           {bracket && bracket.length > 0 && (
@@ -324,7 +351,7 @@ export default function TorneoDetailPage() {
       )}
 
       {/* ──────── TAB: ESTADÍSTICAS ──────── */}
-      {!loading && activeTab === 'estadisticas' && (
+      {!loading && !error && activeTab === 'estadisticas' && (
         <div>
           {tabla && tabla.length > 0 && (
             <div className="row g-4">
