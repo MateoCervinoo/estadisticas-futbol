@@ -420,6 +420,8 @@ export default function Home() {
     )
   }
 
+  const predictionIsOk = prediction?.status === 'ok' && Array.isArray(prediction.score_matrix)
+
   const heatmapClass = (value: number, maxValue: number) => {
     if (maxValue <= 0 || value <= 0) return 'bg-white'
 
@@ -523,6 +525,7 @@ export default function Home() {
     const fetchPrediction = async () => {
       if (!selectedMatch || modalMode !== 'simulate') return
       setPredLoading(true)
+      setPrediction(null)
       try {
         if (selectedMatch.fixture_id === null || selectedMatch.fixture_id === undefined) return
         const data = await getPartidoPrediccion(selectedMatch.fixture_id)
@@ -834,7 +837,7 @@ export default function Home() {
                         <div className="border-bottom border-light pb-3 mb-3">
                           <div className="fw-semibold mb-2">Probabilidades</div>
                           {predLoading && <div className="text-muted small">Calculando probabilidades...</div>}
-                          {!predLoading && prediction && (
+                          {!predLoading && predictionIsOk && (
                             <div className="vstack gap-3">
                               {([
                                 { key: 'home_win' as const, label: 'Local', value: Number(prediction.home_win ?? 0) },
@@ -856,12 +859,17 @@ export default function Home() {
                               })}
                             </div>
                           )}
+                          {!predLoading && prediction && !predictionIsOk && (
+                            <div className="alert alert-warning small mb-0">
+                              {prediction.message || 'Datos insuficientes para generar una predicción confiable.'}
+                            </div>
+                          )}
                           {!predLoading && !prediction && (
-                            <div className="text-muted small">No hay predicción disponible.</div>
+                            <div className="text-muted small">No hay predicción disponible por un error técnico o falta de conexión.</div>
                           )}
                         </div>
 
-                        {!predLoading && prediction?.score_matrix && (
+                        {!predLoading && predictionIsOk && (
                           <div>
                             <div className="fw-semibold mb-2">Top 3 resultados posibles</div>
                             <div className="d-flex flex-wrap gap-2">

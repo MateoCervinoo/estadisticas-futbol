@@ -29,8 +29,11 @@ export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || API_BASE_URL.replace(/^h
 const BASE_URL = API_URL
 
 export interface PredictionResponse {
-  status?: 'insufficient_data'
+  status: 'ok' | 'insufficient_data' | 'model_not_loaded' | 'team_not_supported'
   message?: string
+  model_type?: 'seleccion' | 'club'
+  model_version?: string | null
+  neutral?: boolean
   home_win?: number
   draw?: number
   away_win?: number

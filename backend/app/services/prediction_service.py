@@ -1,4 +1,6 @@
 import logging
+import os
+import unicodedata
 from typing import Any
 
 import numpy as np
@@ -6,17 +8,22 @@ from fastapi import HTTPException
 from sqlmodel import select
 
 from ..db.session import Session, engine
-from ..dixoncoles import predict_match, select_model_for_match
-from ..models import Equipo, Partido
+from ..dixoncoles import predict_match
+from ..models import Equipo, Partido, Torneo
 
 logger = logging.getLogger(__name__)
 
 
 def _norm(s: str) -> str:
     try:
-        return s.strip().casefold()
+        value = s.strip().casefold()
     except Exception:
-        return str(s).strip().casefold()
+        value = str(s).strip().casefold()
+    return "".join(c for c in unicodedata.normalize("NFD", value) if unicodedata.category(c) != "Mn")
+
+
+def _state(status: str, message: str, **extra: Any) -> dict:
+    return {"status": status, "message": message, **extra}
 
 
 def _is_valid_matrix(mat: Any) -> bool:
@@ -44,6 +51,38 @@ def _is_valid_matrix(mat: Any) -> bool:
         return False
 
 
+def _model_version(model: dict | None) -> str | None:
+    if not isinstance(model, dict):
+        return None
+    for key in ("version", "model_version", "trained_at", "created_at"):
+        value = model.get(key)
+        if value:
+            return str(value)
+    path = model.get("path")
+    if path:
+        return os.path.basename(str(path))
+    return None
+
+
+def _model_has_team(model: dict, team_name: str) -> bool:
+    key = _norm(team_name)
+    attack = model.get("attack")
+    defense = model.get("defense")
+
+    if isinstance(attack, dict) and isinstance(defense, dict):
+        return key in {_norm(k) for k in attack} and key in {_norm(k) for k in defense}
+
+    team_to_idx = model.get("team_to_idx")
+    if isinstance(team_to_idx, dict) and (isinstance(attack, (list, tuple)) or isinstance(defense, (list, tuple))):
+        return key in {_norm(k) for k in team_to_idx}
+
+    teams = model.get("teams")
+    if isinstance(teams, (list, tuple)):
+        return key in {_norm(k) for k in teams}
+
+    return False
+
+
 def predict_partido(partido_id: int, sel_model: dict | None, club_model: dict | None) -> dict:
     max_goals = 4
     with Session(engine) as session:
@@ -51,46 +90,53 @@ def predict_partido(partido_id: int, sel_model: dict | None, club_model: dict | 
         if not partido:
             raise HTTPException(status_code=404, detail="Partido no encontrado")
 
+        torneo = session.get(Torneo, partido.torneo_id) if partido.torneo_id else None
+        home_equipo = session.get(Equipo, partido.equipo_local_id) if partido.equipo_local_id else None
+        away_equipo = session.get(Equipo, partido.equipo_visitante_id) if partido.equipo_visitante_id else None
+
     home_name_for_model = partido.home_team
     away_name_for_model = partido.away_team
 
+    if home_equipo and home_equipo.nombre_csv:
+        home_name_for_model = home_equipo.nombre_csv
+    if away_equipo and away_equipo.nombre_csv:
+        away_name_for_model = away_equipo.nombre_csv
+
+    if not partido.fixture_id:
+        return _state("insufficient_data", "El partido no tiene fixture_id asociado")
+    if not home_name_for_model or not away_name_for_model:
+        return _state("insufficient_data", "Faltan nombres de equipos para generar la predicción")
+
+    model_type = "club" if torneo and torneo.categoria == "club" else "seleccion"
+    if home_equipo and away_equipo and home_equipo.tipo != away_equipo.tipo:
+        return _state(
+            "team_not_supported",
+            "No se puede predecir un cruce entre club y selección con los modelos actuales",
+            model_type=model_type,
+        )
+
+    model = club_model if model_type == "club" else sel_model
+    if not isinstance(model, dict) or not model:
+        return _state(
+            "model_not_loaded",
+            f"Modelo de {model_type} no cargado",
+            model_type=model_type,
+        )
+
+    if not _model_has_team(model, home_name_for_model) or not _model_has_team(model, away_name_for_model):
+        return _state(
+            "team_not_supported",
+            "Uno o ambos equipos no están presentes en el modelo",
+            model_type=model_type,
+            home_team=home_name_for_model,
+            away_team=away_name_for_model,
+            model_version=_model_version(model),
+        )
+
+    neutral = True if model_type == "seleccion" else bool(partido.neutral)
+
     try:
-        with Session(engine) as session:
-            if partido.equipo_local_id:
-                he = session.get(Equipo, partido.equipo_local_id)
-                if he and he.nombre_csv:
-                    home_name_for_model = he.nombre_csv
-            if partido.equipo_visitante_id:
-                ae = session.get(Equipo, partido.equipo_visitante_id)
-                if ae and ae.nombre_csv:
-                    away_name_for_model = ae.nombre_csv
-    except Exception:
-        logger.exception("Error resolviendo Equipo para partido %s; usando nombres sin normalizar", partido.fixture_id)
-
-    model = select_model_for_match(partido.id if partido else partido_id, engine, sel_model, club_model)
-    if model is None:
-        model = {"teams": [], "attack": {}, "defense": {}, "gamma": 1.0, "rho": 1.0}
-
-    hkey = _norm(home_name_for_model)
-    akey = _norm(away_name_for_model)
-    attack_param = model.get("attack") if isinstance(model, dict) else None
-    defense_param = model.get("defense") if isinstance(model, dict) else None
-
-    if isinstance(attack_param, dict) and isinstance(defense_param, dict):
-        model_for_pred = model
-    else:
-        gamma = float(model.get("gamma", 1.0)) if isinstance(model, dict) else 1.0
-        rho = float(model.get("rho", 1.0)) if isinstance(model, dict) else 1.0
-        model_for_pred = {
-            "teams": [home_name_for_model, away_name_for_model],
-            "attack": {hkey: 1.0, akey: 1.0},
-            "defense": {hkey: 1.0, akey: 1.0},
-            "gamma": gamma,
-            "rho": rho,
-        }
-
-    try:
-        matrix_raw = predict_match(home_name_for_model, away_name_for_model, model_for_pred, max_goals=max_goals, neutral=True)
+        matrix_raw = predict_match(home_name_for_model, away_name_for_model, model, max_goals=max_goals, neutral=neutral)
     except Exception:
         logger.exception(
             "Error generando predicción matemática para partido %s (%s vs %s)",
@@ -105,6 +151,8 @@ def predict_partido(partido_id: int, sel_model: dict | None, club_model: dict | 
         return {
             "status": "insufficient_data",
             "message": "Predicción en curso o datos insuficientes para generar probabilidades",
+            "model_type": model_type,
+            "model_version": _model_version(model),
         }
 
     home_win = 0.0
@@ -133,6 +181,10 @@ def predict_partido(partido_id: int, sel_model: dict | None, club_model: dict | 
         matrix.append(row)
 
     return {
+        "status": "ok",
+        "model_type": model_type,
+        "model_version": _model_version(model),
+        "neutral": neutral,
         "home_win": round(home_win * 100, 2),
         "draw": round(draw * 100, 2),
         "away_win": round(away_win * 100, 2),

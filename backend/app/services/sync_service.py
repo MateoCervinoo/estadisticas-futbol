@@ -18,32 +18,24 @@ def _resolve_data_path(filename: str) -> str | None:
 
 
 def load_prediction_models(app: FastAPI) -> None:
-    fallback = {
-        "teams": [],
-        "team_to_idx": {},
-        "attack": {},
-        "defense": {},
-        "gamma": 1.0,
-        "rho": 1.0,
-    }
-
     try:
         sel_path = _resolve_data_path("model_params.json")
         sel_model = load_model_json(sel_path) if sel_path else None
         sel_available = bool(sel_model)
         if sel_model:
+            sel_model.setdefault("path", sel_path)
             logger.info("Cargado modelo selecciones desde %s", sel_path)
         else:
             logger.info("No se encontró model_params.json para selecciones")
-            sel_model = fallback
 
         club_path = _resolve_data_path("model_params_clubes.json")
         club_model = load_model_json(club_path) if club_path else None
         club_available = bool(club_model)
         if club_model:
+            club_model.setdefault("path", club_path)
             logger.info("Cargado modelo clubes desde %s", club_path)
         else:
-            logger.info("No se encontró modelo para clubes, se usará el de selecciones como fallback")
+            logger.info("No se encontró modelo para clubes")
 
         app.state.sel_model = sel_model
         app.state.club_model = club_model
@@ -54,10 +46,10 @@ def load_prediction_models(app: FastAPI) -> None:
             "clubes": {"available": club_available, "path": club_path},
         }
     except Exception:
-        logger.exception("No se pudo cargar model_params.json; usando neutrales en memoria")
-        app.state.sel_model = fallback
+        logger.exception("No se pudieron cargar modelos de predicción")
+        app.state.sel_model = None
         app.state.club_model = None
-        app.state.model = fallback
+        app.state.model = None
         app.state.prediction_models_status = {
             "status": "degraded",
             "selecciones": {"available": False, "path": None},
