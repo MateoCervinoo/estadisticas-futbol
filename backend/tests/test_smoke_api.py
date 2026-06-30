@@ -24,7 +24,10 @@ def test_health_model_ok(client):
     response = client.get("/health/model")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["selecciones"]["available"] is True
+    assert data["selecciones"]["team_count"] == 2
 
 
 def test_partidos_responds(client):

@@ -44,7 +44,7 @@ def client():
     app.state.model = app.state.sel_model
     app.state.prediction_models_status = {
         "status": "ok",
-        "selecciones": {"available": True, "path": None},
-        "clubes": {"available": False, "path": None},
+        "selecciones": {"available": True, "path": None, "version": None, "team_count": 2},
+        "clubes": {"available": False, "path": None, "version": None, "team_count": None},
     }
     return TestClient(app)

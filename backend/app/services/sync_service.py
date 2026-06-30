@@ -17,6 +17,42 @@ def _resolve_data_path(filename: str) -> str | None:
     return None
 
 
+def _model_version(model: dict | None) -> str | None:
+    if not isinstance(model, dict):
+        return None
+    for key in ("version", "model_version", "trained_at", "created_at"):
+        value = model.get(key)
+        if value:
+            return str(value)
+    path = model.get("path")
+    return os.path.basename(str(path)) if path else None
+
+
+def _model_team_count(model: dict | None) -> int | None:
+    if not isinstance(model, dict):
+        return None
+    teams = model.get("teams")
+    if isinstance(teams, (list, tuple, set)):
+        return len(teams)
+    team_to_idx = model.get("team_to_idx")
+    if isinstance(team_to_idx, dict):
+        return len(team_to_idx)
+    attack = model.get("attack")
+    if isinstance(attack, dict):
+        return len(attack)
+    return None
+
+
+def _model_status(model: dict | None, path: str | None) -> dict:
+    available = bool(model)
+    return {
+        "available": available,
+        "path": path,
+        "version": _model_version(model),
+        "team_count": _model_team_count(model),
+    }
+
+
 def load_prediction_models(app: FastAPI) -> None:
     try:
         sel_path = _resolve_data_path("model_params.json")
@@ -42,8 +78,8 @@ def load_prediction_models(app: FastAPI) -> None:
         app.state.model = sel_model
         app.state.prediction_models_status = {
             "status": "ok" if sel_available else "degraded",
-            "selecciones": {"available": sel_available, "path": sel_path},
-            "clubes": {"available": club_available, "path": club_path},
+            "selecciones": _model_status(sel_model, sel_path),
+            "clubes": _model_status(club_model, club_path),
         }
     except Exception:
         logger.exception("No se pudieron cargar modelos de predicción")
@@ -52,8 +88,8 @@ def load_prediction_models(app: FastAPI) -> None:
         app.state.model = None
         app.state.prediction_models_status = {
             "status": "degraded",
-            "selecciones": {"available": False, "path": None},
-            "clubes": {"available": False, "path": None},
+            "selecciones": _model_status(None, None),
+            "clubes": _model_status(None, None),
         }
 
 
