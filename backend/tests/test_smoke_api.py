@@ -72,6 +72,7 @@ def test_prediction_with_valid_teams_does_not_explode(client):
 
     assert response.status_code == 200
     data = response.json()
+    assert data["status"] == "ok"
     assert "home_win" in data
     assert "draw" in data
     assert "away_win" in data
