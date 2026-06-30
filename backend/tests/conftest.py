@@ -1,0 +1,38 @@
+import os
+from pathlib import Path
+
+TEST_DB_PATH = Path("/tmp/estadisticas_backend_pytest.db")
+os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
+os.environ.setdefault("API_FOOTBALL_KEY", "")
+
+import pytest
+from sqlmodel import SQLModel
+
+from app.database import engine
+from app.models import *  # noqa: F403 - ensure all SQLModel tables are registered
+
+
+@pytest.fixture(autouse=True)
+def reset_db():
+    SQLModel.metadata.drop_all(engine)
+    SQLModel.metadata.create_all(engine)
+    yield
+    SQLModel.metadata.drop_all(engine)
+
+
+@pytest.fixture
+def client():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    app.state.sel_model = {
+        "teams": ["Argentina", "Brazil"],
+        "team_to_idx": {},
+        "attack": {"argentina": 1.0, "brazil": 1.0},
+        "defense": {"argentina": 1.0, "brazil": 1.0},
+        "gamma": 0.0,
+        "rho": 0.0,
+    }
+    app.state.club_model = None
+    app.state.model = app.state.sel_model
+    return TestClient(app)
