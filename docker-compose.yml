@@ -28,6 +28,7 @@ services:
       - PYTHONUNBUFFERED=1
       - API_FOOTBALL_KEY=${API_FOOTBALL_KEY:-}
       - CSV_DATA_PATH=/app/data/results.csv
+      - RUN_STARTUP_SYNC=false
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached

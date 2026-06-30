@@ -1,9 +1,16 @@
 import os
+import sys
 from pathlib import Path
 
 TEST_DB_PATH = Path("/tmp/estadisticas_backend_pytest.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB_PATH}"
 os.environ.setdefault("API_FOOTBALL_KEY", "")
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
+for path in (str(PROJECT_ROOT), str(BACKEND_ROOT)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 import pytest
 from sqlmodel import SQLModel

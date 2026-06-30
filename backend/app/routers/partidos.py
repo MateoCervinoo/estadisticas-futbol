@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def require_debug_endpoints_enabled() -> None:
+    if os.getenv("ENABLE_DEBUG_ENDPOINTS", "").lower() not in {"1", "true", "yes"}:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
 @router.get("/api/partidos/anyos")
 def api_list_anyos():
     with Session(engine) as session:
@@ -160,6 +165,7 @@ def api_partidos_live():
 
 @router.get("/api/debug/datos-corruptos")
 def debug_datos_corruptos():
+    require_debug_endpoints_enabled()
     build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
     bad_path = os.path.join(os.path.dirname(__file__), "..", "data", "bad_records.csv")
     chosen = DEFAULT_BAD_RECORDS_PATH if os.path.exists(DEFAULT_BAD_RECORDS_PATH) else bad_path if os.path.exists(bad_path) else None
@@ -176,6 +182,7 @@ def debug_datos_corruptos():
 
 @router.get("/api/debug/reporte-datos")
 def debug_reporte_datos(include_records: bool = False):
+    require_debug_endpoints_enabled()
     report = build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
     if not include_records:
         report.pop("records", None)
@@ -184,6 +191,7 @@ def debug_reporte_datos(include_records: bool = False):
 
 @router.post("/api/debug/reparar-identidad-partidos")
 def debug_reparar_identidad_partidos(dry_run: bool = True):
+    require_debug_endpoints_enabled()
     result = repair_partido_identity(dry_run=dry_run)
     if not dry_run:
         build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)
@@ -192,6 +200,7 @@ def debug_reparar_identidad_partidos(dry_run: bool = True):
 
 @router.post("/api/debug/purgar-fixtures-invalidos")
 def debug_purgar_fixtures_invalidos(dry_run: bool = True):
+    require_debug_endpoints_enabled()
     result = purge_invalid_placeholder_fixtures(dry_run=dry_run)
     if not dry_run:
         build_data_quality_report(export_path=DEFAULT_BAD_RECORDS_PATH)

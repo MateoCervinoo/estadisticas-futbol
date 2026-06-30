@@ -118,6 +118,8 @@ Crear archivos `.env` locales a partir de los ejemplos cuando haga falta. No ver
 - Backend/compose: `.env` en la raiz puede definir `API_FOOTBALL_KEY`.
 - Frontend: `frontend/.env.example` documenta `NEXT_PUBLIC_API_URL` y `NEXT_PUBLIC_WS_URL`.
 - Docker Compose ya define `NEXT_PUBLIC_API_URL=http://localhost:8000` para el frontend del stack local.
+- `RUN_STARTUP_SYNC=true` habilita sincronización externa al arrancar el backend. Por defecto queda desactivada para evitar trabajo duplicado con `sync_worker`.
+- `ENABLE_DEBUG_ENDPOINTS=true` habilita endpoints `/api/debug/*`. Por defecto quedan ocultos.
 
 ## Levantar el proyecto
 
