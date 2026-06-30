@@ -42,4 +42,9 @@ def client():
     }
     app.state.club_model = None
     app.state.model = app.state.sel_model
+    app.state.prediction_models_status = {
+        "status": "ok",
+        "selecciones": {"available": True, "path": None},
+        "clubes": {"available": False, "path": None},
+    }
     return TestClient(app)
