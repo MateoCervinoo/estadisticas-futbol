@@ -3,8 +3,7 @@ from typing import Optional
 from fastapi import APIRouter
 from sqlmodel import select
 
-from ..database import engine
-from ..db.session import Session
+from ..db.session import Session, engine
 from ..models import Equipo, Partido
 from ..services.analytics_service import team_display_name
 

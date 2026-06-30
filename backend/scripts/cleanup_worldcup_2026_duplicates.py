@@ -12,9 +12,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sqlmodel import Session, select
+from sqlmodel import select
 
-from backend.app.database import engine
+from backend.app.db.session import Session, engine
 from backend.app.models import Equipo, Partido, PartidoEstadisticas, Torneo
 
 WORLD_CUP_2026_START = date(2026, 6, 11)

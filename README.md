@@ -111,10 +111,24 @@ Se consideran derivados/locales y no deben versionarse:
 - Secretos/local config: `.env`, `.env.*`, `entrenador/.env`
 - Archivos privados o temporales: `archivos-privados/`, `downloaded_files/`, `session-*.md`
 
+## Configuracion local
+
+Crear archivos `.env` locales a partir de los ejemplos cuando haga falta. No versionar secretos.
+
+- Backend/compose: `.env` en la raiz puede definir `API_FOOTBALL_KEY`.
+- Frontend: `frontend/.env.example` documenta `NEXT_PUBLIC_API_URL` y `NEXT_PUBLIC_WS_URL`.
+- Docker Compose ya define `NEXT_PUBLIC_API_URL=http://localhost:8000` para el frontend del stack local.
+
 ## Levantar el proyecto
 
 ```bash
-docker compose up --build -d
+docker compose up --build
+```
+
+Equivalente:
+
+```bash
+make up
 ```
 
 Frontend: `http://localhost:3000`  
@@ -126,25 +140,85 @@ El esquema conceptual vive en `shared/models.py`. El esquema operativo se gestio
 
 La documentación específica está en `backend/README_DB.md`.
 
-Aplicar migraciones:
+Aplicar migraciones directamente desde `backend/`:
 
 ```bash
-make -C backend migrate_db
+alembic upgrade head
+```
+
+O desde la raiz con Docker:
+
+```bash
+make migrate
 ```
 
 Reset controlado de la DB local:
 
 ```bash
-make -C backend reset_db CONFIRM=reset
+make reset-db
 ```
 
 El reset borra el volumen local de PostgreSQL y recrea el esquema desde las migraciones. Usarlo solo cuando los datos puedan regenerarse desde scripts, CSV o sincronización externa.
 
-Flujo recomendado para recrear datos locales:
+## Flujo Operativo De DB
+
+Orden recomendado para recrear datos locales:
 
 ```bash
-make -C backend reset_db CONFIRM=reset
-make -C backend seed_db
-make -C backend load_results
-make -C backend sync_data
+make reset-db
+make seed
+make load-results
+make sync
 ```
+
+Comandos equivalentes desde `backend/`:
+
+```bash
+make reset-db CONFIRM=reset
+make seed_db
+make load_results
+make sync_data
+```
+
+## Fuentes De Datos
+
+- `shared/models.py`: modelo conceptual de tablas SQLModel.
+- `backend/alembic/`: fuente operativa del esquema de DB.
+- `data/results.csv`: histórico base para ingesta local.
+- `data/shootouts.csv`: definición de penales para partidos históricos cuando existe.
+- API externa configurada por `API_FOOTBALL_KEY`: fixtures, estados, escudos y métricas sincronizadas.
+- `data/model_params.json`: parámetros entrenados que consume el backend para predicciones.
+
+Los archivos derivados/cache no son fuente: `.env`, `__pycache__/`, `.next*/`, logs, `.pytest_cache/`, `node_modules/`.
+
+## Entrenar El Modelo
+
+Con dependencias de `entrenador/requirements.txt` instaladas:
+
+```bash
+make train
+```
+
+Equivalente directo:
+
+```bash
+python -m entrenador.05_train_model
+```
+
+El entrenamiento lee datos desde la DB configurada y guarda parámetros en la ruta configurada por el entrenador, normalmente `data/model_params.json`.
+
+## Verificacion
+
+Backend:
+
+```bash
+make test-backend
+```
+
+Frontend:
+
+```bash
+make build-frontend
+```
+
+Si el entorno Python local no tiene dependencias, crear un virtualenv e instalar `backend/requirements.txt` antes de correr tests.

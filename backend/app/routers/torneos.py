@@ -3,8 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from sqlmodel import select
 
-from ..database import engine
-from ..db.session import Session
+from ..db.session import Session, engine
 from ..models import Equipo, Partido, Torneo
 from ..services.tournament_service import is_finished_match, season_bounds, season_label_for_match
 

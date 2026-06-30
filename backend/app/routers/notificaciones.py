@@ -4,8 +4,7 @@ import logging
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlmodel import select
 
-from ..database import engine
-from ..db.session import Session
+from ..db.session import Session, engine
 from ..models import Notificacion
 
 logger = logging.getLogger(__name__)

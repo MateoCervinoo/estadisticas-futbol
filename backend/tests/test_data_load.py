@@ -1,6 +1,6 @@
 from sqlmodel import Session, select
 
-from app.database import engine
+from app.db.session import engine
 from app.data_manager import ingest_historical_to_db
 from app.models import Partido
 

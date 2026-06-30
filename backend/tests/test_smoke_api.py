@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session
 
-from app.database import engine
+from app.db.session import engine
 from app.models import Equipo, Partido, Torneo
 
 

@@ -3,9 +3,9 @@ import os
 from collections import defaultdict
 from typing import Any
 
-from sqlmodel import Session, select
+from sqlmodel import select
 
-from ..database import engine
+from ..db.session import Session, engine
 from ..models import Partido
 from .data_normalization_service import build_hash_dedupe, canonical_key, classify_tipo_dato
 

@@ -8,7 +8,7 @@ os.environ.setdefault("API_FOOTBALL_KEY", "")
 import pytest
 from sqlmodel import SQLModel
 
-from app.database import engine
+from app.db.session import engine
 from app.models import *  # noqa: F403 - ensure all SQLModel tables are registered
 
 

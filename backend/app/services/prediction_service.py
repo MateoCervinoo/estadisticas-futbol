@@ -3,9 +3,9 @@ from typing import Any
 
 import numpy as np
 from fastapi import HTTPException
-from sqlmodel import Session, select
+from sqlmodel import select
 
-from ..database import engine
+from ..db.session import Session, engine
 from ..dixoncoles import predict_match, select_model_for_match
 from ..models import Equipo, Partido
 

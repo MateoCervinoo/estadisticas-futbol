@@ -12,11 +12,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from .api_client import APIFootballClient
 from .models import Partido, PartidoEstadisticas, Notificacion
-from .database import engine, init_db
+from .database import init_db
+from .db.session import Session, engine
 from .data_mapper import normalize_status
 from .services.data_normalization_service import (
     build_hash_dedupe,

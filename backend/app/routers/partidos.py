@@ -7,8 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import and_, func, or_
 from sqlmodel import select
 
-from ..database import engine
-from ..db.session import Session
+from ..db.session import Session, engine
 from ..models import Equipo, Partido, PartidoEstadisticas, Torneo
 from ..services.data_quality_service import (
     DEFAULT_BAD_RECORDS_PATH,

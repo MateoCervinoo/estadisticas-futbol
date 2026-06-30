@@ -1,8 +1,7 @@
 import os
 import pandas as pd
-from sqlmodel import Session, select
-# Importamos el engine de tu base de datos para cuando sumemos los partidos en vivo
-from app.database import engine
+from sqlmodel import select
+from app.db.session import Session, engine
 from app.models import Partido, Equipo
 from app.data_mapper import normalize_status
 import logging

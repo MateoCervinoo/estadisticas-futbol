@@ -6,8 +6,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import or_
 from sqlmodel import select
 
-from ..database import engine
-from ..db.session import Session
+from ..db.session import Session, engine
 from ..models import Equipo, Partido
 
 router = APIRouter()
