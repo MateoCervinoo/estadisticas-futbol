@@ -29,12 +29,15 @@ services:
       - API_FOOTBALL_KEY=${API_FOOTBALL_KEY:-}
       - CSV_DATA_PATH=/app/data/results.csv
       - RUN_STARTUP_SYNC=false
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - ./backend:/app:cached
       - ./data:/app/data:cached
       - ./shared:/app/shared:cached
     ports:
       - "8000:8000"
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   sync_worker:
     build:

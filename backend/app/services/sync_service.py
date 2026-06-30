@@ -30,6 +30,7 @@ def load_prediction_models(app: FastAPI) -> None:
     try:
         sel_path = _resolve_data_path("model_params.json")
         sel_model = load_model_json(sel_path) if sel_path else None
+        sel_available = bool(sel_model)
         if sel_model:
             logger.info("Cargado modelo selecciones desde %s", sel_path)
         else:
@@ -38,6 +39,7 @@ def load_prediction_models(app: FastAPI) -> None:
 
         club_path = _resolve_data_path("model_params_clubes.json")
         club_model = load_model_json(club_path) if club_path else None
+        club_available = bool(club_model)
         if club_model:
             logger.info("Cargado modelo clubes desde %s", club_path)
         else:
@@ -46,11 +48,21 @@ def load_prediction_models(app: FastAPI) -> None:
         app.state.sel_model = sel_model
         app.state.club_model = club_model
         app.state.model = sel_model
+        app.state.prediction_models_status = {
+            "status": "ok" if sel_available else "degraded",
+            "selecciones": {"available": sel_available, "path": sel_path},
+            "clubes": {"available": club_available, "path": club_path},
+        }
     except Exception:
         logger.exception("No se pudo cargar model_params.json; usando neutrales en memoria")
         app.state.sel_model = fallback
         app.state.club_model = None
         app.state.model = fallback
+        app.state.prediction_models_status = {
+            "status": "degraded",
+            "selecciones": {"available": False, "path": None},
+            "clubes": {"available": False, "path": None},
+        }
 
 
 def seed_and_sync_startup(app: FastAPI) -> None:

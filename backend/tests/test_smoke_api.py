@@ -13,6 +13,20 @@ def test_health_ok(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_health_db_ok(client):
+    response = client.get("/health/db")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_health_model_ok(client):
+    response = client.get("/health/model")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
 def test_partidos_responds(client):
     response = client.get("/api/partidos")
 
