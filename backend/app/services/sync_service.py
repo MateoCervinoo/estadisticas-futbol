@@ -63,6 +63,10 @@ def seed_and_sync_startup(app: FastAPI) -> None:
 
     load_prediction_models(app)
 
+    if os.getenv("RUN_STARTUP_SYNC", "").lower() not in {"1", "true", "yes"}:
+        logger.info("Sincronización en startup desactivada; usar sync_worker o RUN_STARTUP_SYNC=true.")
+        return
+
     try:
         logger.info("Iniciando sincronización de fixtures y métricas...")
         sync_summary = sync_fixtures_and_metrics()
