@@ -124,3 +124,66 @@ def test_dedupe_partido_items_prefers_api_fixture_with_media():
 
     assert len(result) == 1
     assert result[0]["id"] == 2
+
+
+def test_dedupe_partido_items_priority_is_order_independent():
+    csv_item = {
+        "id": 10,
+        "date": "2026-06-12T18:00:00",
+        "home_team": "Argentina",
+        "away_team": "Brazil",
+        "tournament": "Mundial",
+        "fixture_id": None,
+        "home_score": 1,
+        "away_score": 0,
+    }
+    api_item = {
+        "id": 9,
+        "date": "2026-06-12T18:00:00",
+        "home_team": "Argentina",
+        "away_team": "Brazil",
+        "tournament": "Mundial",
+        "fixture_id": 123,
+    }
+
+    assert dedupe_partido_items([csv_item, api_item])[0]["id"] == 9
+    assert dedupe_partido_items([api_item, csv_item])[0]["id"] == 9
+
+
+def test_dedupe_partido_items_keeps_distinct_matches():
+    base_item = {
+        "id": 1,
+        "date": "2026-06-12T18:00:00",
+        "home_team": "Argentina",
+        "away_team": "Brazil",
+        "tournament": "Mundial",
+        "fixture_id": 123,
+    }
+    different_date = {**base_item, "id": 2, "date": "2026-06-13T18:00:00"}
+    different_tournament = {**base_item, "id": 3, "tournament": "Copa America"}
+    reversed_teams = {**base_item, "id": 4, "home_team": "Brazil", "away_team": "Argentina"}
+
+    result = dedupe_partido_items([base_item, different_date, different_tournament, reversed_teams])
+
+    assert [item["id"] for item in result] == [1, 2, 3, 4]
+
+
+def test_dedupe_partido_items_does_not_merge_incomplete_identity():
+    missing_tournament = {
+        "id": 1,
+        "date": "2026-06-12T18:00:00",
+        "home_team": "Argentina",
+        "away_team": "Brazil",
+        "fixture_id": 123,
+    }
+    also_missing_tournament = {
+        "id": 2,
+        "date": "2026-06-12T18:00:00",
+        "home_team": "Argentina",
+        "away_team": "Brazil",
+        "fixture_id": 124,
+    }
+
+    result = dedupe_partido_items([missing_tournament, also_missing_tournament])
+
+    assert [item["id"] for item in result] == [1, 2]

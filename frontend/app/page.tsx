@@ -432,31 +432,7 @@ export default function Home() {
   const rawStageLabel = (stage: string) => STAGE_LABELS[stage] ?? stage
   const rawGroupLabel = (group: string) => group.replace('GROUP_', 'Grupo ')
 
-  const dedupeMatches = (matches: Partido[]) => {
-    const byKey = new Map<string, Partido>()
-    for (const match of matches) {
-      const key = [
-        dateKey(match.date),
-        (match.home_team || '').trim().toLowerCase(),
-        (match.away_team || '').trim().toLowerCase(),
-        tournamentOf(match).trim().toLowerCase(),
-      ].join('|')
-      const current = byKey.get(key)
-      if (!current) {
-        byKey.set(key, match)
-        continue
-      }
-
-      const currentIsApi = current.fixture_id !== null && current.fixture_id !== undefined
-      const nextIsApi = match.fixture_id !== null && match.fixture_id !== undefined
-      if ((!currentIsApi && nextIsApi) || (match.home_crest_url && !current.home_crest_url)) {
-        byKey.set(key, match)
-      }
-    }
-    return Array.from(byKey.values())
-  }
-
-  const allMatches = useMemo(() => dedupeMatches(partidos ?? []), [partidos])
+  const allMatches = partidos ?? []
   const competitionOptions = useMemo(
     () => ['Todos', ...Array.from(new Set(availableCompetitions.filter(Boolean)))],
     [availableCompetitions]
