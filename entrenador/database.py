@@ -1,13 +1,19 @@
 from __future__ import annotations
 import logging
-from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy import text
+import re
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from sqlmodel import create_engine, Session
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 _engine = None
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BACKEND_ROOT = PROJECT_ROOT / "backend"
 
 
 def get_engine():
@@ -15,9 +21,6 @@ def get_engine():
     if _engine is None:
         url = settings.database_url
         if settings.DB_ENGINE == "sqlite":
-            # NUEVO: crear directorio si no existe
-            import re
-            from pathlib import Path
             m = re.match(r"sqlite:///(.+)", url)
             if m:
                 db_path = Path(m.group(1))
@@ -29,9 +32,13 @@ def get_engine():
 
 
 def init_db():
-    engine = get_engine()
-    SQLModel.metadata.create_all(engine)
-    logger.info("Tablas creadas/verificadas en %s", settings.DB_ENGINE)
+    """Aplica las migraciones compartidas del backend."""
+    get_engine()
+    alembic_cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(alembic_cfg, "head")
+    logger.info("Migraciones aplicadas/verificadas en %s", settings.DB_ENGINE)
 
 
 def get_session():

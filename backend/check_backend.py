@@ -15,7 +15,7 @@ except Exception as e:
     print("ERROR importing backend modules:", e)
     sys.exit(1)
 
-print("Backend imports OK. Initializing DB (metadata create_all)...")
+print("Backend imports OK. Applying DB migrations...")
 try:
     init_db()
     print("DB initialization OK.")

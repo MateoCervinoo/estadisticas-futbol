@@ -122,18 +122,29 @@ Backend: `http://localhost:8000`
 
 ## Base de datos
 
-El esquema de la base se gestiona con Alembic desde `backend/alembic`.
+El esquema conceptual vive en `shared/models.py`. El esquema operativo se gestiona con Alembic desde `backend/alembic`.
+
+La documentación específica está en `backend/README_DB.md`.
 
 Aplicar migraciones:
 
 ```bash
-docker compose run --rm backend alembic upgrade head
+make -C backend migrate_db
 ```
 
 Reset controlado de la DB local:
 
 ```bash
-make -C backend reset-db CONFIRM=reset
+make -C backend reset_db CONFIRM=reset
 ```
 
 El reset borra el volumen local de PostgreSQL y recrea el esquema desde las migraciones. Usarlo solo cuando los datos puedan regenerarse desde scripts, CSV o sincronización externa.
+
+Flujo recomendado para recrear datos locales:
+
+```bash
+make -C backend reset_db CONFIRM=reset
+make -C backend seed_db
+make -C backend load_results
+make -C backend sync_data
+```
