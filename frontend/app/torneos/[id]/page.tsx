@@ -111,10 +111,9 @@ export default function TorneoDetailPage() {
     setSelectedMatch(p)
     setCurrentStats(null)
     setStatsLoading(true)
-    getPartidoEstadisticas(p.id).then(stats => {
-      setCurrentStats(stats)
-      setStatsLoading(false)
-    })
+    getPartidoEstadisticas(p.id)
+      .then(stats => setCurrentStats(stats))
+      .finally(() => setStatsLoading(false))
   }
 
   const closeModal = () => { setSelectedMatch(null); setCurrentStats(null) }

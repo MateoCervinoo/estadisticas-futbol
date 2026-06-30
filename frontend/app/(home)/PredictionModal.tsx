@@ -8,6 +8,13 @@ type PredictionModalProps = {
 
 export default function PredictionModal({ prediction, predLoading }: PredictionModalProps) {
   const predictionIsOk = prediction?.status === 'ok' && Array.isArray(prediction.score_matrix)
+  const statusTitle = (() => {
+    if (prediction?.status === 'model_not_loaded') return 'Modelo no disponible'
+    if (prediction?.status === 'team_not_supported') return 'Equipo sin soporte'
+    if (prediction?.status === 'technical_error') return 'Error técnico'
+    return 'Datos insuficientes'
+  })()
+  const statusClass = prediction?.status === 'technical_error' ? 'alert-danger' : 'alert-warning'
 
   return (
     <div>
@@ -37,8 +44,9 @@ export default function PredictionModal({ prediction, predLoading }: PredictionM
           </div>
         )}
         {!predLoading && prediction && !predictionIsOk && (
-          <div className="alert alert-warning small mb-0">
-            {prediction.message || 'Datos insuficientes para generar una predicción confiable.'}
+          <div className={`alert ${statusClass} small mb-0`}>
+            <div className="fw-semibold mb-1">{statusTitle}</div>
+            <div>{prediction.message || 'Datos insuficientes para generar una predicción confiable.'}</div>
           </div>
         )}
         {!predLoading && !prediction && (
