@@ -80,6 +80,7 @@ class Partido(SQLModel, table=True):
     torneo_id: Optional[int] = Field(default=None, foreign_key="torneo.id")
     etapa: Optional[str] = None
     grupo: Optional[str] = None
+    jornada: Optional[int] = None
     sede_id: Optional[int] = Field(default=None, foreign_key="sede.id")
     arbitro_id: Optional[int] = Field(default=None, foreign_key="arbitro.id")
     asistencia: Optional[int] = None

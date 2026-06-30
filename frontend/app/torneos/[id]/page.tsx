@@ -4,8 +4,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
-  getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas,
-  TablaRow, BracketRound, Partido,
+  getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas, getTorneoTemporadas,
+  TablaRow, TablaGrupo, BracketRound, Partido,
 } from '../../../src/services/api'
 
 type Tab = 'calendario' | 'posiciones' | 'eliminatorias' | 'estadisticas'
@@ -20,7 +20,8 @@ const TOURNAMENT_LABELS: Record<string, string> = {
 }
 
 const STAGE_LABELS: Record<string, string> = {
-  GROUP_STAGE: 'Fase de Grupos', ROUND_OF_16: 'Octavos de Final',
+  GROUP_STAGE: 'Fase de Grupos', LAST_32: 'Dieciseisavos de Final', ROUND_OF_32: 'Dieciseisavos de Final',
+  LAST_16: 'Octavos de Final', ROUND_OF_16: 'Octavos de Final',
   QUARTER_FINALS: 'Cuartos de Final', SEMI_FINALS: 'Semifinales',
   THIRD_PLACE: 'Tercer Puesto', FINAL: 'Final',
 }
@@ -55,10 +56,13 @@ export default function TorneoDetailPage() {
   const torneoId = Number(params.id)
   const [activeTab, setActiveTab] = useState<Tab>('calendario')
   const [tabla, setTabla] = useState<TablaRow[] | null>(null)
+  const [tablaGrupos, setTablaGrupos] = useState<TablaGrupo[] | null>(null)
   const [bracket, setBracketData] = useState<BracketRound[] | null>(null)
   const [partidos, setPartidos] = useState<Partido[] | null>(null)
   const [torName, setTorName] = useState('')
   const [torTipo, setTorTipo] = useState('')
+  const [temporadas, setTemporadas] = useState<string[]>([])
+  const [selectedSeason, setSelectedSeason] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [sortCol, setSortCol] = useState<string>('pts')
   const [sortAsc, setSortAsc] = useState(false)
@@ -68,26 +72,37 @@ export default function TorneoDetailPage() {
   const [statsLoading, setStatsLoading] = useState(false)
 
   useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      getTablaPosiciones(torneoId),
-      getBracket(torneoId),
-      getPartidos(),
-    ]).then(([t, b, ps]) => {
-      if (t) { setTabla(t.tabla); setTorName(t.torneo); setTorTipo(t.tipo) }
-      if (b) setBracketData(b.bracket)
-      if (ps) {
-        // filter matches for this tournament by checking the tournament label
-        const filtered = ps.filter(p => {
-          const raw = (p.tournament || '').trim()
-          const label = TOURNAMENT_LABELS[raw] ?? raw
-          return label === t?.torneo || raw === t?.torneo
-        })
-        setPartidos(filtered)
-      }
-      setLoading(false)
+    getTorneoTemporadas(torneoId).then((values) => {
+      setTemporadas(values)
+      setSelectedSeason((current) => current || values[0] || '')
     })
   }, [torneoId])
+
+  useEffect(() => {
+    if (!selectedSeason) return
+    setLoading(true)
+    const seasonFilters = /^\d{4}$/.test(selectedSeason)
+      ? { year: Number(selectedSeason), grouped: true }
+      : { season: selectedSeason, grouped: true }
+    const matchFilters = /^\d{4}$/.test(selectedSeason)
+      ? { torneo_id: torneoId, year: Number(selectedSeason) }
+      : { torneo_id: torneoId, season: selectedSeason }
+    Promise.all([
+      getTablaPosiciones(torneoId, seasonFilters),
+      getBracket(torneoId, seasonFilters),
+      getPartidos(matchFilters),
+    ]).then(([t, b, ps]) => {
+      if (t) {
+        setTabla(t.tabla)
+        setTablaGrupos(t.grupos ?? null)
+        setTorName(t.torneo)
+        setTorTipo(t.tipo)
+      }
+      if (b) setBracketData(b.bracket)
+      if (ps) setPartidos(ps)
+      setLoading(false)
+    })
+  }, [torneoId, selectedSeason])
 
   const formatDate = (iso: string) => {
     try {
@@ -99,6 +114,7 @@ export default function TorneoDetailPage() {
   }
 
   const isPlayed = (p: Partido) => {
+    if (['NS', 'TIMED', 'SCHEDULED', 'IN_PLAY', 'PAUSED'].includes(p.status)) return false
     return (p.home_score !== null && p.home_score !== undefined && p.away_score !== null && p.away_score !== undefined)
       || ['FT', 'AET', 'PEN'].includes(p.status)
   }
@@ -122,6 +138,53 @@ export default function TorneoDetailPage() {
     if (sortCol !== col) return ''
     return sortAsc ? ' ▲' : ' ▼'
   }
+
+  const renderTabla = (rows: TablaRow[]) => (
+    <div className="table-responsive">
+      <table className="table table-hover table-sm align-middle">
+        <thead className="table-light">
+          <tr>
+            <th>#</th>
+            <th>Equipo</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pj')}>PJ{sortIcon('pj')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pg')}>PG{sortIcon('pg')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pe')}>PE{sortIcon('pe')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pp')}>PP{sortIcon('pp')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gf')}>GF{sortIcon('gf')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gc')}>GC{sortIcon('gc')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gd')}>GD{sortIcon('gd')}</th>
+            <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('xg_diff')}>xG Diff{sortIcon('xg_diff')}</th>
+            <th className="text-center fw-bold" style={{cursor:'pointer'}} onClick={() => toggleSort('pts')}>Pts{sortIcon('pts')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => {
+            const xgColor = r.xg_diff > 0 ? 'text-success' : r.xg_diff < 0 ? 'text-danger' : ''
+            return (
+              <tr key={r.equipo_id}>
+                <td className="text-muted">{i + 1}</td>
+                <td>
+                  <Link href={`/equipos/${r.equipo_id}`} className="text-decoration-none text-dark d-flex align-items-center gap-2">
+                    {r.codigo_bandera && <span className={`fi fi-${r.codigo_bandera}`} />}
+                    {r.equipo}
+                  </Link>
+                </td>
+                <td className="text-center">{r.pj}</td>
+                <td className="text-center">{r.pg}</td>
+                <td className="text-center">{r.pe}</td>
+                <td className="text-center">{r.pp}</td>
+                <td className="text-center">{r.gf}</td>
+                <td className="text-center">{r.gc}</td>
+                <td className="text-center">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
+                <td className={`text-center ${xgColor}`}>{r.xg_diff > 0 ? `+${r.xg_diff}` : r.xg_diff}</td>
+                <td className="text-center fw-bold">{r.pts}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
 
   const formaBadge = (resultado: string) => {
     const map: Record<string, string> = { H: 'bg-success', A: 'bg-danger', D: 'bg-warning text-dark' }
@@ -158,6 +221,19 @@ export default function TorneoDetailPage() {
         <Link href="/torneos" className="btn btn-outline-secondary btn-sm">&larr; Torneos</Link>
         <h3 className="mb-0">{torName || 'Torneo'}</h3>
         <span className="badge bg-secondary">{torTipo}</span>
+        {temporadas.length > 0 && (
+          <select
+            className="form-select form-select-sm ms-auto"
+            style={{ maxWidth: 160 }}
+            value={selectedSeason}
+            onChange={(e) => setSelectedSeason(e.target.value)}
+            aria-label="Temporada"
+          >
+            {temporadas.map((season) => (
+              <option key={season} value={season}>{season}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <ul className="nav nav-tabs mb-4">
@@ -220,52 +296,20 @@ export default function TorneoDetailPage() {
       {/* ──────── TAB: POSICIONES ──────── */}
       {!loading && activeTab === 'posiciones' && (
         <div>
-          {(!tabla || tabla.length === 0) && <div className="text-muted text-center py-5">No hay datos de posiciones.</div>}
-          {tabla && tabla.length > 0 && (
-            <div className="table-responsive">
-              <table className="table table-hover table-sm align-middle">
-                <thead className="table-light">
-                  <tr>
-                    <th>#</th>
-                    <th>Equipo</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pj')}>PJ{sortIcon('pj')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pg')}>PG{sortIcon('pg')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pe')}>PE{sortIcon('pe')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('pp')}>PP{sortIcon('pp')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gf')}>GF{sortIcon('gf')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gc')}>GC{sortIcon('gc')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('gd')}>GD{sortIcon('gd')}</th>
-                    <th className="text-center" style={{cursor:'pointer'}} onClick={() => toggleSort('xg_diff')}>xG Diff{sortIcon('xg_diff')}</th>
-                    <th className="text-center fw-bold" style={{cursor:'pointer'}} onClick={() => toggleSort('pts')}>Pts{sortIcon('pts')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedTabla.map((r, i) => {
-                    const xgColor = r.xg_diff > 0 ? 'text-success' : r.xg_diff < 0 ? 'text-danger' : ''
-                    return (
-                      <tr key={r.equipo_id}>
-                        <td className="text-muted">{i + 1}</td>
-                        <td>
-                          <Link href={`/equipos/${r.equipo_id}`} className="text-decoration-none text-dark d-flex align-items-center gap-2">
-                            {r.codigo_bandera && <span className={`fi fi-${r.codigo_bandera}`} />}
-                            {r.equipo}
-                          </Link>
-                        </td>
-                        <td className="text-center">{r.pj}</td>
-                        <td className="text-center">{r.pg}</td>
-                        <td className="text-center">{r.pe}</td>
-                        <td className="text-center">{r.pp}</td>
-                        <td className="text-center">{r.gf}</td>
-                        <td className="text-center">{r.gc}</td>
-                        <td className="text-center">{r.gd > 0 ? `+${r.gd}` : r.gd}</td>
-                        <td className={`text-center ${xgColor}`}>{r.xg_diff > 0 ? `+${r.xg_diff}` : r.xg_diff}</td>
-                        <td className="text-center fw-bold">{r.pts}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          {tablaGrupos && tablaGrupos.length > 0 ? (
+            <div className="vstack gap-4">
+              {tablaGrupos.map((group) => (
+                <section key={group.grupo}>
+                  <h5 className="mb-3">{group.grupo.replace('GROUP_', 'Grupo ')}</h5>
+                  {renderTabla(group.tabla)}
+                </section>
+              ))}
             </div>
+          ) : (
+            <>
+              {(!tabla || tabla.length === 0) && <div className="text-muted text-center py-5">No hay datos de posiciones.</div>}
+              {tabla && tabla.length > 0 && renderTabla(sortedTabla)}
+            </>
           )}
         </div>
       )}

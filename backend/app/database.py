@@ -35,6 +35,7 @@ def ensure_partido_columns():
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS torneo_id INTEGER",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS etapa VARCHAR",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS grupo VARCHAR",
+        "ALTER TABLE partido ADD COLUMN IF NOT EXISTS jornada INTEGER",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS home_team VARCHAR",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS away_team VARCHAR",
         "ALTER TABLE partido ADD COLUMN IF NOT EXISTS tournament VARCHAR",

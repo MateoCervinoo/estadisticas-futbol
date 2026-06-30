@@ -51,7 +51,75 @@ body {
   animation: pulse-animation 1.5s ease-in-out infinite;
 }
 
+.football-loader {
+  display: grid;
+  justify-content: center;
+}
+
+.football-loader-field {
+  position: relative;
+  width: min(320px, 78vw);
+  height: 92px;
+  overflow: hidden;
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #2f8f46 0,
+      #2f8f46 34px,
+      #287d3d 34px,
+      #287d3d 68px
+    );
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28);
+}
+
+.football-loader-field::before {
+  content: "";
+  position: absolute;
+  inset: 16px 22px;
+  border: 2px solid rgba(255,255,255,0.55);
+  border-radius: 7px;
+}
+
+.football-loader-ball {
+  position: absolute;
+  left: 42px;
+  bottom: 28px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, #111 0 4px, transparent 5px),
+    radial-gradient(circle at 35% 32%, #111 0 3px, transparent 4px),
+    radial-gradient(circle at 65% 34%, #111 0 3px, transparent 4px),
+    radial-gradient(circle at 38% 68%, #111 0 3px, transparent 4px),
+    radial-gradient(circle at 68% 66%, #111 0 3px, transparent 4px),
+    #fff;
+  animation: football-bounce 1.1s ease-in-out infinite;
+}
+
+.football-loader-shadow {
+  position: absolute;
+  left: 38px;
+  bottom: 22px;
+  width: 38px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.24);
+  animation: football-shadow 1.1s ease-in-out infinite;
+}
+
 @keyframes pulse-animation {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+@keyframes football-bounce {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  50% { transform: translate(198px, -30px) rotate(250deg); }
+}
+
+@keyframes football-shadow {
+  0%, 100% { transform: translateX(0) scaleX(1); opacity: 0.24; }
+  50% { transform: translateX(198px) scaleX(0.72); opacity: 0.14; }
 }

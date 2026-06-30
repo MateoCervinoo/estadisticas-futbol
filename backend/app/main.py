@@ -6,10 +6,10 @@ import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select, SQLModel
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func
 
 from .database import engine, ensure_partido_columns
-from .models import Partido, Equipo, PartidoEstadisticas, Notificacion
+from .models import Partido, Equipo, PartidoEstadisticas, Notificacion, Torneo
 from .dixoncoles import predict_match, predict_exact_score_matrix, load_model_json, select_model_for_match
 from .sync import sync_fixtures_and_metrics
 import pandas as pd
@@ -202,6 +202,7 @@ def _enrich_partido_item(p: Partido, session: Session) -> dict:
         "status": "estado",
         "stage": "etapa",
         "group": "grupo",
+        "matchday": "jornada",
         "ht_home_score": "goles_local_ht",
         "ht_away_score": "goles_visitante_ht",
     }
@@ -231,6 +232,52 @@ def _enrich_partido_item(p: Partido, session: Session) -> dict:
     return item
 
 
+def _dedupe_partido_items(items: list[dict]) -> list[dict]:
+    """Evita devolver dos fuentes del mismo partido en listados generales."""
+    by_key: dict[str, dict] = {}
+    for item in items:
+        raw_date = item.get("date") or item.get("fecha_utc") or ""
+        date_key = str(raw_date)[:10]
+        tournament = str(item.get("tournament") or "").strip().casefold()
+        home = str(item.get("home_team") or item.get("home_nombre_es") or "").strip().casefold()
+        away = str(item.get("away_team") or item.get("away_nombre_es") or "").strip().casefold()
+        key = "|".join([date_key, home, away, tournament])
+
+        current = by_key.get(key)
+        if current is None:
+            by_key[key] = item
+            continue
+
+        current_has_fixture = current.get("fixture_id") is not None
+        item_has_fixture = item.get("fixture_id") is not None
+        current_has_media = bool(current.get("home_crest_url") or current.get("away_crest_url"))
+        item_has_media = bool(item.get("home_crest_url") or item.get("away_crest_url"))
+        if (item_has_fixture and not current_has_fixture) or (item_has_media and not current_has_media):
+            by_key[key] = item
+
+    return list(by_key.values())
+
+
+def _season_bounds(season: Optional[str] = None, year: Optional[int] = None) -> tuple[Optional[datetime.datetime], Optional[datetime.datetime]]:
+    if season:
+        try:
+            start_year = int(str(season).split("/")[0])
+            return datetime.datetime(start_year, 7, 1), datetime.datetime(start_year + 1, 7, 1)
+        except Exception:
+            return None, None
+    if year is not None:
+        return datetime.datetime(year, 1, 1), datetime.datetime(year + 1, 1, 1)
+    return None, None
+
+
+def _season_label_for_match(match_date: datetime.datetime, tournament_type: str | None = None) -> str:
+    if tournament_type == "mundial":
+        return str(match_date.year)
+    if match_date.month >= 7:
+        return f"{match_date.year}/{str(match_date.year + 1)[-2:]}"
+    return f"{match_date.year - 1}/{str(match_date.year)[-2:]}"
+
+
 @app.get("/api/partidos/anyos")
 def api_list_anyos():
     """Devuelve los años disponibles en la base de datos (para el filtro de año)."""
@@ -241,16 +288,66 @@ def api_list_anyos():
         return years
 
 
+@app.get("/api/partidos/filtros")
+def api_partidos_filtros(
+    tournament: Optional[str] = None,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    stage: Optional[str] = None,
+):
+    """Metadata liviana para armar filtros sin descargar todos los partidos."""
+    with Session(engine) as session:
+        conditions = []
+        if tournament:
+            conditions.append(Partido.tournament == tournament)
+        start, end = _season_bounds(season=season, year=year)
+        if start and end:
+            conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
+
+        stmt = select(Partido)
+        if conditions:
+            stmt = stmt.where(*conditions)
+        partidos = session.exec(stmt).all()
+
+        tournaments = sorted({p.tournament for p in partidos if p.tournament})
+        stages = sorted({p.etapa for p in partidos if p.etapa})
+        if stage and stage not in ("Todos", "GROUP_STAGE"):
+            groups = []
+        else:
+            groups = sorted({p.grupo for p in partidos if p.grupo})
+        matchdays = sorted({p.jornada for p in partidos if p.jornada is not None})
+        dates = sorted({p.fecha_utc.date().isoformat() for p in partidos if p.fecha_utc is not None})
+        years = sorted({p.fecha_utc.year for p in partidos if p.fecha_utc is not None})
+
+        return {
+            "years": years,
+            "tournaments": tournaments,
+            "stages": stages,
+            "groups": groups,
+            "matchdays": matchdays,
+            "dates": dates,
+        }
+
+
 @app.get("/api/partidos")
 def api_list_partidos(
     mundial: bool = False,
     proximos: bool = False,
     year: Optional[int] = None,
+    season: Optional[str] = None,
+    torneo_id: Optional[int] = None,
+    tournament: Optional[str] = None,
+    stage: Optional[str] = None,
+    group: Optional[str] = None,
+    matchday: Optional[int] = None,
+    date: Optional[str] = None,
 ):
     """Devuelve partidos ordenados por fecha.
     - mundial=true: solo FIFA World Cup
     - proximos=true: solo estados NS/TIMED
     - year=AAAA: filtrar por año
+    - season=2025/26: temporada de clubes
+    - torneo_id/tournament/stage/group/date: filtros exactos
     - sin parámetros: todos los partidos
     """
     with Session(engine) as session:
@@ -271,14 +368,51 @@ def api_list_partidos(
         if main_conditions:
             all_conditions.append(or_(*main_conditions))
         if year is not None:
-            from sqlalchemy import extract
-            all_conditions.append(extract('year', Partido.fecha_utc) == year)
+            start, end = _season_bounds(year=year)
+            if start and end:
+                all_conditions.append(Partido.fecha_utc >= start)
+                all_conditions.append(Partido.fecha_utc < end)
+        if season:
+            start, end = _season_bounds(season=season)
+            if start and end:
+                all_conditions.append(Partido.fecha_utc >= start)
+                all_conditions.append(Partido.fecha_utc < end)
+        if torneo_id is not None:
+            all_conditions.append(Partido.torneo_id == torneo_id)
+        if tournament:
+            all_conditions.append(Partido.tournament == tournament)
+        if stage:
+            all_conditions.append(Partido.etapa == stage)
+        if group:
+            all_conditions.append(Partido.grupo == group)
+        if matchday is not None:
+            all_conditions.append(Partido.jornada == matchday)
+        if date:
+            all_conditions.append(func.date(Partido.fecha_utc) == date)
 
         if all_conditions:
             stmt = stmt.where(and_(*all_conditions))
 
         partidos: List[Partido] = session.exec(stmt).all()
-        return [_enrich_partido_item(p, session) for p in partidos]
+        items = [_enrich_partido_item(p, session) for p in partidos]
+        return _dedupe_partido_items(items)
+
+
+@app.get("/api/torneos/{torneo_id}/temporadas")
+def api_torneo_temporadas(torneo_id: int):
+    """Devuelve temporadas disponibles para un torneo."""
+    with Session(engine) as session:
+        torneo = session.get(Torneo, torneo_id)
+        if not torneo:
+            raise HTTPException(404, "Torneo no encontrado")
+        partidos = session.exec(
+            select(Partido).where(Partido.torneo_id == torneo_id, Partido.fecha_utc.isnot(None))
+        ).all()
+        labels = sorted(
+            {_season_label_for_match(p.fecha_utc, torneo.tipo) for p in partidos if p.fecha_utc},
+            reverse=True,
+        )
+        return {"torneo_id": torneo_id, "temporadas": labels}
 
 
 @app.get("/api/partidos/finalizados")
@@ -682,7 +816,7 @@ def api_equipo_distribucion(equipo_id: int):
 
 
 @app.get("/api/analytics/xg-vs-real")
-def api_xg_vs_real(torneo_id: Optional[int] = None):
+def api_xg_vs_real(torneo_id: Optional[int] = None, tipo: Optional[str] = None):
     """Comparación xG vs goles reales por equipo (opcional filtrado por torneo)."""
     from .models import Equipo as EqModel
     with Session(engine) as session:
@@ -715,6 +849,8 @@ def api_xg_vs_real(torneo_id: Optional[int] = None):
         result = []
         for eid, stats in team_stats.items():
             eq = session.get(EqModel, eid)
+            if tipo in ("club", "seleccion") and eq and eq.tipo != tipo:
+                continue
             nombre = eq.nombre_canonico or eq.nombre_es or eq.nombre_csv if eq else f"E{eid}"
             result.append({
                 "equipo_id": eid,
@@ -732,13 +868,23 @@ def api_xg_vs_real(torneo_id: Optional[int] = None):
 
 
 @app.get("/api/equipos/search")
-def api_equipos_search(q: str = ""):
+def api_equipos_search(q: str = "", tipo: Optional[str] = None):
     """Busca equipos por nombre."""
     from .models import Equipo as EqModel
     with Session(engine) as session:
         stmt = select(EqModel)
+        if tipo in ("club", "seleccion"):
+            stmt = stmt.where(EqModel.tipo == tipo)
         if q:
-            stmt = stmt.where(EqModel.nombre_canonico.ilike(f"%{q}%"))
+            like = f"%{q}%"
+            stmt = stmt.where(or_(
+                EqModel.nombre_canonico.ilike(like),
+                EqModel.nombre_es.ilike(like),
+                EqModel.nombre_api.ilike(like),
+                EqModel.nombre_csv.ilike(like),
+                EqModel.nombre_fbref.ilike(like),
+                EqModel.nombre_understat.ilike(like),
+            ))
         stmt = stmt.order_by(EqModel.nombre_canonico).limit(50)
         equipos = session.exec(stmt).all()
         return [
@@ -779,104 +925,131 @@ def api_list_torneos():
 
 
 @app.get("/api/torneos/{torneo_id}/tabla-posiciones")
-def api_torneo_tabla(torneo_id: int):
-    """Calcula tabla de posiciones para un torneo (todos los tiempos, sin grupo/etapa)."""
+def api_torneo_tabla(
+    torneo_id: int,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    grouped: bool = False,
+):
+    """Calcula tabla de posiciones para un torneo, con soporte de temporada y grupos."""
     from .models import Torneo as TorneoModel, Equipo as EquipoModel
     with Session(engine) as session:
         torneo = session.get(TorneoModel, torneo_id)
         if not torneo:
             raise HTTPException(404, "Torneo no encontrado")
 
-        partidos = session.exec(
-            select(Partido).where(
-                Partido.torneo_id == torneo_id,
-                Partido.estado == "FT",
-                Partido.goles_local.isnot(None),
-                Partido.goles_visitante.isnot(None),
-            )
-        ).all()
+        conditions = [
+            Partido.torneo_id == torneo_id,
+            Partido.estado == "FT",
+            Partido.goles_local.isnot(None),
+            Partido.goles_visitante.isnot(None),
+        ]
+        start, end = _season_bounds(season=season, year=year)
+        if start and end:
+            conditions.append(Partido.fecha_utc >= start)
+            conditions.append(Partido.fecha_utc < end)
+        if grouped or torneo.tipo == "mundial":
+            conditions.append(Partido.etapa == "GROUP_STAGE")
 
-    stats: dict[int, dict] = {}
-    for p in partidos:
-        for eid in (p.equipo_local_id, p.equipo_visitante_id):
-            if eid and eid not in stats:
-                stats[eid] = {"pj": 0, "pg": 0, "pe": 0, "pp": 0, "gf": 0, "gc": 0, "xg_favor": 0.0, "xg_contra": 0.0}
+        partidos = session.exec(select(Partido).where(*conditions)).all()
 
-        if p.equipo_local_id and p.equipo_visitante_id:
-            gl, gv = p.goles_local, p.goles_visitante
-            stats[p.equipo_local_id]["pj"] += 1
-            stats[p.equipo_visitante_id]["pj"] += 1
-            stats[p.equipo_local_id]["gf"] += gl
-            stats[p.equipo_local_id]["gc"] += gv
-            stats[p.equipo_visitante_id]["gf"] += gv
-            stats[p.equipo_visitante_id]["gc"] += gl
+    def build_rows(rows_partidos: list[Partido]) -> list[dict]:
+        stats: dict[int, dict] = {}
+        for p in rows_partidos:
+            for eid in (p.equipo_local_id, p.equipo_visitante_id):
+                if eid and eid not in stats:
+                    stats[eid] = {"pj": 0, "pg": 0, "pe": 0, "pp": 0, "gf": 0, "gc": 0, "xg_favor": 0.0, "xg_contra": 0.0}
 
-            if p.xg_local:
-                stats[p.equipo_local_id]["xg_favor"] += float(p.xg_local)
-                stats[p.equipo_visitante_id]["xg_contra"] += float(p.xg_local)
-            if p.xg_visitante:
-                stats[p.equipo_visitante_id]["xg_favor"] += float(p.xg_visitante)
-                stats[p.equipo_local_id]["xg_contra"] += float(p.xg_visitante)
+            if p.equipo_local_id and p.equipo_visitante_id:
+                gl, gv = p.goles_local, p.goles_visitante
+                stats[p.equipo_local_id]["pj"] += 1
+                stats[p.equipo_visitante_id]["pj"] += 1
+                stats[p.equipo_local_id]["gf"] += gl
+                stats[p.equipo_local_id]["gc"] += gv
+                stats[p.equipo_visitante_id]["gf"] += gv
+                stats[p.equipo_visitante_id]["gc"] += gl
 
-            if gl > gv:
-                stats[p.equipo_local_id]["pg"] += 1
-                stats[p.equipo_visitante_id]["pp"] += 1
-            elif gl < gv:
-                stats[p.equipo_visitante_id]["pg"] += 1
-                stats[p.equipo_local_id]["pp"] += 1
-            else:
-                stats[p.equipo_local_id]["pe"] += 1
-                stats[p.equipo_visitante_id]["pe"] += 1
+                if p.xg_local:
+                    stats[p.equipo_local_id]["xg_favor"] += float(p.xg_local)
+                    stats[p.equipo_visitante_id]["xg_contra"] += float(p.xg_local)
+                if p.xg_visitante:
+                    stats[p.equipo_visitante_id]["xg_favor"] += float(p.xg_visitante)
+                    stats[p.equipo_local_id]["xg_contra"] += float(p.xg_visitante)
 
-    rows = []
-    with Session(engine) as session:
-        for eid, s in stats.items():
-            eq = session.get(Equipo, eid)
-            nombre = eq.nombre_canonico or eq.nombre_es or eq.nombre_csv or f"Equipo {eid}" if eq else f"Equipo {eid}"
-            codigo = eq.codigo_bandera if eq else None
-            rows.append({
-                "equipo_id": eid,
-                "equipo": nombre,
-                "codigo_bandera": codigo,
-                "pj": s["pj"],
-                "pg": s["pg"],
-                "pe": s["pe"],
-                "pp": s["pp"],
-                "gf": s["gf"],
-                "gc": s["gc"],
-                "gd": s["gf"] - s["gc"],
-                "pts": s["pg"] * 3 + s["pe"],
-                "xg_favor": round(s["xg_favor"], 2),
-                "xg_contra": round(s["xg_contra"], 2),
-                "xg_diff": round(s["xg_favor"] - s["xg_contra"], 2),
-            })
+                if gl > gv:
+                    stats[p.equipo_local_id]["pg"] += 1
+                    stats[p.equipo_visitante_id]["pp"] += 1
+                elif gl < gv:
+                    stats[p.equipo_visitante_id]["pg"] += 1
+                    stats[p.equipo_local_id]["pp"] += 1
+                else:
+                    stats[p.equipo_local_id]["pe"] += 1
+                    stats[p.equipo_visitante_id]["pe"] += 1
 
-    rows.sort(key=lambda r: (-r["pts"], -r["gd"], -r["gf"]))
-    return {"torneo": torneo.nombre_canonico, "tipo": torneo.tipo, "tabla": rows}
+        rows = []
+        with Session(engine) as session:
+            for eid, s in stats.items():
+                eq = session.get(Equipo, eid)
+                nombre = eq.nombre_canonico or eq.nombre_es or eq.nombre_csv or f"Equipo {eid}" if eq else f"Equipo {eid}"
+                codigo = eq.codigo_bandera if eq else None
+                rows.append({
+                    "equipo_id": eid,
+                    "equipo": nombre,
+                    "codigo_bandera": codigo,
+                    "pj": s["pj"],
+                    "pg": s["pg"],
+                    "pe": s["pe"],
+                    "pp": s["pp"],
+                    "gf": s["gf"],
+                    "gc": s["gc"],
+                    "gd": s["gf"] - s["gc"],
+                    "pts": s["pg"] * 3 + s["pe"],
+                    "xg_favor": round(s["xg_favor"], 2),
+                    "xg_contra": round(s["xg_contra"], 2),
+                    "xg_diff": round(s["xg_favor"] - s["xg_contra"], 2),
+                })
+
+        rows.sort(key=lambda r: (-r["pts"], -r["gd"], -r["gf"]))
+        return rows
+
+    response = {"torneo": torneo.nombre_canonico, "tipo": torneo.tipo, "tabla": build_rows(partidos)}
+    if grouped or torneo.tipo == "mundial":
+        groups: dict[str, list[Partido]] = {}
+        for p in partidos:
+            groups.setdefault(p.grupo or "Sin grupo", []).append(p)
+        response["grupos"] = [
+            {"grupo": grupo, "tabla": build_rows(group_matches)}
+            for grupo, group_matches in sorted(groups.items())
+        ]
+    return response
 
 
 @app.get("/api/torneos/{torneo_id}/bracket")
-def api_torneo_bracket(torneo_id: int):
+def api_torneo_bracket(torneo_id: int, year: Optional[int] = None, season: Optional[str] = None):
     """Devuelve estructura eliminatoria (bracket) para un torneo."""
     with Session(engine) as session:
         torneo = session.get(Torneo, torneo_id)
         if not torneo:
             raise HTTPException(404, "Torneo no encontrado")
 
-        partidos = session.exec(
-            select(Partido).where(
-                Partido.torneo_id == torneo_id,
-                Partido.etapa.isnot(None),
-                Partido.etapa != "",
-            ).order_by(Partido.fecha_utc)
-        ).all()
+        conditions = [
+            Partido.torneo_id == torneo_id,
+            Partido.etapa.isnot(None),
+            Partido.etapa != "",
+        ]
+        start, end = _season_bounds(season=season, year=year)
+        if start and end:
+            conditions.append(Partido.fecha_utc >= start)
+            conditions.append(Partido.fecha_utc < end)
+        partidos = session.exec(select(Partido).where(*conditions).order_by(Partido.fecha_utc)).all()
 
     STAGE_ORDER = {
-        "GROUP_STAGE": 0, "ROUND_OF_16": 1, "QUARTER_FINALS": 2,
-        "SEMI_FINALS": 3, "THIRD_PLACE": 4, "FINAL": 5,
+        "GROUP_STAGE": 0, "LAST_32": 1, "ROUND_OF_32": 1, "LAST_16": 2, "ROUND_OF_16": 2,
+        "QUARTER_FINALS": 3, "SEMI_FINALS": 4, "THIRD_PLACE": 5, "FINAL": 6,
     }
     STAGE_LABELS = {
-        "GROUP_STAGE": "Fase de Grupos", "ROUND_OF_16": "Octavos",
+        "GROUP_STAGE": "Fase de Grupos", "LAST_32": "Dieciseisavos", "ROUND_OF_32": "Dieciseisavos",
+        "LAST_16": "Octavos", "ROUND_OF_16": "Octavos",
         "QUARTER_FINALS": "Cuartos", "SEMI_FINALS": "Semifinales",
         "THIRD_PLACE": "Tercer Puesto", "FINAL": "Final",
     }
