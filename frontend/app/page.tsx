@@ -130,7 +130,6 @@ export default function Home() {
     || stageFilter !== 'Todos'
     || groupFilter !== 'Todos'
     || matchdayFilter !== undefined
-    || showFavoritesOnly
   )
 
   useEffect(() => {
@@ -198,7 +197,7 @@ export default function Home() {
       mounted = false
       if (slowTimer) clearTimeout(slowTimer)
     }
-  }, [selectedYear, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter, showFavoritesOnly, hasActiveServerFilters])
+  }, [selectedYear, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter, hasActiveServerFilters])
 
   useEffect(() => {
     getPartidoFilterMetadata({
@@ -690,9 +689,13 @@ export default function Home() {
                     <button
                       className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
                       onClick={() => setShowFavoritesOnly((v) => !v)}
+                      title="Filtra sobre los partidos ya cargados por los filtros activos"
                     >
                       ⭐ Mis Partidos {favorites.length > 0 && `(${favorites.length})`}
                     </button>
+                    {showFavoritesOnly && !hasActiveServerFilters && (
+                      <span className="small text-muted">Aplicá un filtro de servidor para cargar partidos favoritos.</span>
+                    )}
                   </div>
 
                   <div className="d-flex flex-wrap align-items-center gap-2 mb-3">

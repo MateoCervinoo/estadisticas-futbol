@@ -26,7 +26,7 @@ export default function AnalisisPage() {
 
   // Debounced team search
   useEffect(() => {
-    if (teamQuery.length < 1) {
+    if (teamQuery.trim().length < 2) {
       setTeams([])
       return
     }
@@ -96,11 +96,11 @@ export default function AnalisisPage() {
 
   const downloadCSV = useCallback(() => {
     if (xgData.length === 0) return
-    const headers = ['Equipo', 'PJ', 'Goles', 'xG', 'Diferencia', 'Goles p90', 'xG p90']
+    const headers = ['Equipo', 'PJ', 'Goles', 'xG', 'xGA', 'Dif G-xG', 'Dif xG-xGA', 'Goles p90', 'xG p90', 'xGA p90']
     const rows = xgData.map((r: any) => [
-      r.nombre, r.pj, r.goles, r.xg, r.diferencia, r.goles_p90, r.xg_p90,
+      r.nombre, r.pj, r.goles, r.xg, r.xga, r.diferencia, r.xg_diff, r.goles_p90, r.xg_p90, r.xga_p90,
     ])
-    const csv = [headers.join(','), ...rows.map((r: string[]) => r.join(','))].join('\n')
+    const csv = [headers.join(','), ...rows.map((r: Array<string | number>) => r.join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -232,7 +232,7 @@ export default function AnalisisPage() {
                   </button>
                 </div>
                 <div className="card shadow-sm border-0 rounded-3 p-3">
-                  <p className="small text-muted mb-3">Goles reales vs xG por equipo (todos los torneos)</p>
+                  <p className="small text-muted mb-3">Goles reales, xG y xGA por equipo (todos los torneos)</p>
                   <ResponsiveContainer width="100%" height={500}>
                     <BarChart data={xgData.slice(0, 30)} layout="vertical" margin={{ left: 120 }}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -242,6 +242,7 @@ export default function AnalisisPage() {
                       <Legend />
                       <Bar dataKey="goles_p90" fill="#28a745" name="Goles p90" />
                       <Bar dataKey="xg_p90" fill="#ffc107" name="xG p90" />
+                      <Bar dataKey="xga_p90" fill="#dc3545" name="xGA p90" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -254,9 +255,12 @@ export default function AnalisisPage() {
                           <th className="text-end">PJ</th>
                           <th className="text-end">Goles</th>
                           <th className="text-end">xG</th>
-                          <th className="text-end">Dif</th>
+                          <th className="text-end">xGA</th>
+                          <th className="text-end">G-xG</th>
+                          <th className="text-end">xG-xGA</th>
                           <th className="text-end">G/p90</th>
                           <th className="text-end">xG/p90</th>
+                          <th className="text-end">xGA/p90</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -266,11 +270,16 @@ export default function AnalisisPage() {
                             <td className="text-end">{r.pj}</td>
                             <td className="text-end">{r.goles}</td>
                             <td className="text-end">{r.xg}</td>
+                            <td className="text-end">{r.xga}</td>
                             <td className={`text-end fw-semibold ${r.diferencia > 0 ? 'text-success' : r.diferencia < 0 ? 'text-danger' : ''}`}>
                               {r.diferencia > 0 ? '+' : ''}{r.diferencia}
                             </td>
+                            <td className={`text-end fw-semibold ${r.xg_diff > 0 ? 'text-success' : r.xg_diff < 0 ? 'text-danger' : ''}`}>
+                              {r.xg_diff > 0 ? '+' : ''}{r.xg_diff}
+                            </td>
                             <td className="text-end">{r.goles_p90}</td>
                             <td className="text-end">{r.xg_p90}</td>
+                            <td className="text-end">{r.xga_p90}</td>
                           </tr>
                         ))}
                       </tbody>

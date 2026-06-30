@@ -278,6 +278,12 @@ def _season_label_for_match(match_date: datetime.datetime, tournament_type: str 
     return f"{match_date.year - 1}/{str(match_date.year)[-2:]}"
 
 
+def _is_finished_match(p: Partido) -> bool:
+    if p.goles_local is None or p.goles_visitante is None:
+        return False
+    return str(p.estado or "").upper() in {"FT", "AET", "PEN", "FINISHED"}
+
+
 @app.get("/api/partidos/anyos")
 def api_list_anyos():
     """Devuelve los años disponibles en la base de datos (para el filtro de año)."""
@@ -356,11 +362,19 @@ def api_list_partidos(
         main_conditions = []
         if mundial:
             from .models import Torneo
-            t = session.exec(
-                select(Torneo).where(Torneo.nombre_canonico == "FIFA World Cup")
-            ).first()
-            if t:
-                main_conditions.append(Partido.torneo_id == t.id)
+            torneos = session.exec(
+                select(Torneo).where(or_(
+                    Torneo.nombre_canonico.ilike("%world cup%"),
+                    Torneo.nombre_canonico.ilike("%mundial%"),
+                ))
+            ).all()
+            torneo_ids = [t.id for t in torneos if t.id is not None]
+            conditions = []
+            if torneo_ids:
+                conditions.append(Partido.torneo_id.in_(torneo_ids))
+            conditions.append(Partido.tournament.ilike("%world cup%"))
+            conditions.append(Partido.tournament.ilike("%mundial%"))
+            main_conditions.append(or_(*conditions))
         if proximos:
             main_conditions.append(Partido.estado.in_(["NS", "TIMED"]))
 
@@ -835,16 +849,20 @@ def api_xg_vs_real(torneo_id: Optional[int] = None, tipo: Optional[str] = None):
                 if eid is None:
                     continue
                 if eid not in team_stats:
-                    team_stats[eid] = {"pj": 0, "goles": 0, "xg": 0.0}
+                    team_stats[eid] = {"pj": 0, "goles": 0, "xg": 0.0, "xga": 0.0}
                 team_stats[eid]["pj"] += 1
                 if is_local:
                     team_stats[eid]["goles"] += p.goles_local or 0
-                    if p.xg_local:
+                    if p.xg_local is not None:
                         team_stats[eid]["xg"] += float(p.xg_local)
+                    if p.xg_visitante is not None:
+                        team_stats[eid]["xga"] += float(p.xg_visitante)
                 else:
                     team_stats[eid]["goles"] += p.goles_visitante or 0
-                    if p.xg_visitante:
+                    if p.xg_visitante is not None:
                         team_stats[eid]["xg"] += float(p.xg_visitante)
+                    if p.xg_local is not None:
+                        team_stats[eid]["xga"] += float(p.xg_local)
 
         result = []
         for eid, stats in team_stats.items():
@@ -859,9 +877,12 @@ def api_xg_vs_real(torneo_id: Optional[int] = None, tipo: Optional[str] = None):
                 "pj": stats["pj"],
                 "goles": stats["goles"],
                 "xg": round(stats["xg"], 2),
+                "xga": round(stats["xga"], 2),
                 "diferencia": round(stats["goles"] - stats["xg"], 2),
+                "xg_diff": round(stats["xg"] - stats["xga"], 2),
                 "goles_p90": round(stats["goles"] / stats["pj"], 2) if stats["pj"] else 0,
                 "xg_p90": round(stats["xg"] / stats["pj"], 2) if stats["pj"] else 0,
+                "xga_p90": round(stats["xga"] / stats["pj"], 2) if stats["pj"] else 0,
             })
         result.sort(key=lambda r: -r["goles"])
         return result
@@ -938,12 +959,7 @@ def api_torneo_tabla(
         if not torneo:
             raise HTTPException(404, "Torneo no encontrado")
 
-        conditions = [
-            Partido.torneo_id == torneo_id,
-            Partido.estado == "FT",
-            Partido.goles_local.isnot(None),
-            Partido.goles_visitante.isnot(None),
-        ]
+        conditions = [Partido.torneo_id == torneo_id]
         start, end = _season_bounds(season=season, year=year)
         if start and end:
             conditions.append(Partido.fecha_utc >= start)
@@ -960,7 +976,7 @@ def api_torneo_tabla(
                 if eid and eid not in stats:
                     stats[eid] = {"pj": 0, "pg": 0, "pe": 0, "pp": 0, "gf": 0, "gc": 0, "xg_favor": 0.0, "xg_contra": 0.0}
 
-            if p.equipo_local_id and p.equipo_visitante_id:
+            if _is_finished_match(p) and p.equipo_local_id and p.equipo_visitante_id:
                 gl, gv = p.goles_local, p.goles_visitante
                 stats[p.equipo_local_id]["pj"] += 1
                 stats[p.equipo_visitante_id]["pj"] += 1
@@ -969,10 +985,10 @@ def api_torneo_tabla(
                 stats[p.equipo_visitante_id]["gf"] += gv
                 stats[p.equipo_visitante_id]["gc"] += gl
 
-                if p.xg_local:
+                if p.xg_local is not None:
                     stats[p.equipo_local_id]["xg_favor"] += float(p.xg_local)
                     stats[p.equipo_visitante_id]["xg_contra"] += float(p.xg_local)
-                if p.xg_visitante:
+                if p.xg_visitante is not None:
                     stats[p.equipo_visitante_id]["xg_favor"] += float(p.xg_visitante)
                     stats[p.equipo_local_id]["xg_contra"] += float(p.xg_visitante)
 

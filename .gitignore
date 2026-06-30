@@ -6,7 +6,11 @@ frontend/.next*/
 frontend/tmp/
 frontend/tsconfig.tsbuildinfo
 *.pyc
+*.log
 .DS_Store
 archivos-privados
 archivos-privados/
 entrenador/.env
+downloaded_files/
+session-*.md
+.env
