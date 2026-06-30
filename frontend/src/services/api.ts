@@ -22,7 +22,22 @@ export interface Partido {
   away_xg: number | null
 }
 
-const BASE_URL = 'http://localhost:8000/api'
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+export const API_URL = `${API_BASE_URL}/api`
+export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || API_BASE_URL.replace(/^http/, 'ws') + '/ws/matches'
+
+const BASE_URL = API_URL
+
+export interface PredictionResponse {
+  status?: 'insufficient_data'
+  message?: string
+  home_win?: number
+  draw?: number
+  away_win?: number
+  score_matrix?: number[][]
+  score_matrix_flat?: { home: number; away: number; prob: number }[]
+  most_likely?: { home: number; away: number }
+}
 
 async function safeJson(response: Response) {
   const text = await response.text()
@@ -165,6 +180,16 @@ export async function getPartidoEstadisticas(partidoId: number): Promise<Partido
     const data = await safeJson(res)
     const stats = data?.estadisticas?.[0] ?? null
     return stats as PartidoEstadisticas | null
+  } catch {
+    return null
+  }
+}
+
+export async function getPartidoPrediccion(fixtureId: number): Promise<PredictionResponse | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/partidos/${fixtureId}/prediccion`)
+    if (!res.ok) return null
+    return safeJson(res)
   } catch {
     return null
   }

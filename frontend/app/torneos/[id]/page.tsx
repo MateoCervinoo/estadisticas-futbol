@@ -3,9 +3,10 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import StatRow from '../../../components/StatRow'
 import {
   getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas, getTorneoTemporadas,
-  TablaRow, TablaGrupo, BracketRound, Partido,
+  TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas,
 } from '../../../src/services/api'
 
 type Tab = 'calendario' | 'posiciones' | 'eliminatorias' | 'estadisticas'
@@ -26,31 +27,6 @@ const STAGE_LABELS: Record<string, string> = {
   THIRD_PLACE: 'Tercer Puesto', FINAL: 'Final',
 }
 
-const StatRow = ({ label, home, away, fmt = 'int' }: { label: string; home: number; away: number; fmt?: 'int' | 'float' | 'pct' }) => {
-  const fmtVal = (v: number) => {
-    if (fmt === 'pct') return `${Math.round(v)}%`
-    if (fmt === 'float') return v.toFixed(2)
-    return String(Math.round(v))
-  }
-  const total = home + away
-  const homePct = total > 0 ? (home / total) * 100 : 50
-  const homeBar = homePct < 10 ? 10 : homePct > 90 ? 90 : homePct
-  const awayBar = 100 - homeBar
-  return (
-    <div>
-      <div className="d-flex justify-content-between small mb-1">
-        <span className="fw-semibold">{fmtVal(home)}</span>
-        <span className="text-muted">{label}</span>
-        <span className="fw-semibold">{fmtVal(away)}</span>
-      </div>
-      <div className="progress" style={{ height: 6 }}>
-        <div className="progress-bar bg-success" style={{ width: `${homeBar}%` }} />
-        <div className="progress-bar bg-danger" style={{ width: `${awayBar}%` }} />
-      </div>
-    </div>
-  )
-}
-
 export default function TorneoDetailPage() {
   const params = useParams()
   const torneoId = Number(params.id)
@@ -68,7 +44,7 @@ export default function TorneoDetailPage() {
   const [sortAsc, setSortAsc] = useState(false)
   // detail modal
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
-  const [currentStats, setCurrentStats] = useState<any>(null)
+  const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
 
   useEffect(() => {

@@ -5,24 +5,49 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { API_URL } from '../../src/services/api'
 
 type Tab = 'evolution' | 'xg-vs-real' | 'distribucion'
 type TeamType = 'club' | 'seleccion'
+type TeamSearchResult = { id: number; nombre: string; codigo_bandera: string | null }
+type SelectedTeam = { id: number; nombre: string }
+type EvolutionPoint = {
+  match_index: number
+  rolling_gf_avg: number
+  rolling_gc_avg: number
+}
+type DistributionPoint = {
+  goles: number
+  actual_pct: number
+  poisson_pct: number
+}
+type XgVsRealRow = {
+  equipo_id: number
+  nombre: string
+  codigo_bandera?: string | null
+  pj: number
+  goles: number
+  xg: number
+  xga: number
+  diferencia: number
+  xg_diff: number
+  goles_p90: number
+  xg_p90: number
+  xga_p90: number
+}
 
 export default function AnalisisPage() {
   const [tab, setTab] = useState<Tab>('evolution')
   const [teamType, setTeamType] = useState<TeamType>('club')
   const [teamQuery, setTeamQuery] = useState('')
-  const [teams, setTeams] = useState<{ id: number; nombre: string; codigo_bandera: string | null }[]>([])
-  const [selectedTeam, setSelectedTeam] = useState<{ id: number; nombre: string } | null>(null)
-  const [evolution, setEvolution] = useState<any[]>([])
-  const [distribucion, setDistribucion] = useState<any[]>([])
-  const [xgData, setXgData] = useState<any[]>([])
+  const [teams, setTeams] = useState<TeamSearchResult[]>([])
+  const [selectedTeam, setSelectedTeam] = useState<SelectedTeam | null>(null)
+  const [evolution, setEvolution] = useState<EvolutionPoint[]>([])
+  const [distribucion, setDistribucion] = useState<DistributionPoint[]>([])
+  const [xgData, setXgData] = useState<XgVsRealRow[]>([])
   const [evolLoading, setEvolLoading] = useState(false)
   const [xgLoading, setXgLoading] = useState(false)
   const [distLoading, setDistLoading] = useState(false)
-
-  const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   // Debounced team search
   useEffect(() => {
@@ -32,53 +57,53 @@ export default function AnalisisPage() {
     }
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`${BASE_URL}/api/equipos/search?q=${encodeURIComponent(teamQuery)}&tipo=${teamType}`)
+        const res = await fetch(`${API_URL}/equipos/search?q=${encodeURIComponent(teamQuery)}&tipo=${teamType}`)
         if (res.ok) setTeams(await res.json())
       } catch {}
     }, 300)
     return () => clearTimeout(timer)
-  }, [teamQuery, teamType, BASE_URL])
+  }, [teamQuery, teamType])
 
   // Fetch evolution when a team is selected
   useEffect(() => {
     if (!selectedTeam) return
     setEvolLoading(true)
-    fetch(`${BASE_URL}/api/equipos/${selectedTeam.id}/evolution`)
+    fetch(`${API_URL}/equipos/${selectedTeam.id}/evolution`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) setEvolution(data.evolution || [])
         setEvolLoading(false)
       })
       .catch(() => setEvolLoading(false))
-  }, [selectedTeam, BASE_URL])
+  }, [selectedTeam])
 
   // Fetch distribution when a team is selected
   useEffect(() => {
     if (!selectedTeam) return
     setDistLoading(true)
-    fetch(`${BASE_URL}/api/equipos/${selectedTeam.id}/distribucion`)
+    fetch(`${API_URL}/equipos/${selectedTeam.id}/distribucion`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) setDistribucion(data.distribucion || [])
         setDistLoading(false)
       })
       .catch(() => setDistLoading(false))
-  }, [selectedTeam, BASE_URL])
+  }, [selectedTeam])
 
   // Fetch xG vs real data
   useEffect(() => {
     if (tab !== 'xg-vs-real') return
     setXgLoading(true)
-    fetch(`${BASE_URL}/api/analytics/xg-vs-real?tipo=${teamType}`)
+    fetch(`${API_URL}/analytics/xg-vs-real?tipo=${teamType}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) setXgData(data)
         setXgLoading(false)
       })
       .catch(() => setXgLoading(false))
-  }, [tab, teamType, BASE_URL])
+  }, [tab, teamType])
 
-  const selectTeam = useCallback((t: { id: number; nombre: string }) => {
+  const selectTeam = useCallback((t: SelectedTeam) => {
     setSelectedTeam(t)
     setTeamQuery('')
     setTeams([])
@@ -97,7 +122,7 @@ export default function AnalisisPage() {
   const downloadCSV = useCallback(() => {
     if (xgData.length === 0) return
     const headers = ['Equipo', 'PJ', 'Goles', 'xG', 'xGA', 'Dif G-xG', 'Dif xG-xGA', 'Goles p90', 'xG p90', 'xGA p90']
-    const rows = xgData.map((r: any) => [
+    const rows = xgData.map((r) => [
       r.nombre, r.pj, r.goles, r.xg, r.xga, r.diferencia, r.xg_diff, r.goles_p90, r.xg_p90, r.xga_p90,
     ])
     const csv = [headers.join(','), ...rows.map((r: Array<string | number>) => r.join(','))].join('\n')
@@ -264,7 +289,7 @@ export default function AnalisisPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {xgData.map((r: any) => (
+                        {xgData.map((r) => (
                           <tr key={r.equipo_id}>
                             <td>{r.codigo_bandera && <span className={`fi fi-${r.codigo_bandera} me-1`} />}{r.nombre}</td>
                             <td className="text-end">{r.pj}</td>
