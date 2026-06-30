@@ -4,18 +4,18 @@ from typing import List, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_
 from sqlmodel import select
 
 from ..db.session import Session, engine
-from ..models import Equipo, Partido, PartidoEstadisticas, Torneo
+from ..models import Partido, PartidoEstadisticas
 from ..services.data_quality_service import (
     DEFAULT_BAD_RECORDS_PATH,
     build_data_quality_report,
     purge_invalid_placeholder_fixtures,
     repair_partido_identity,
 )
-from ..services.partido_service import dedupe_partido_items, enrich_partido_item, season_bounds
+from ..services.partido_service import build_partido_filter_conditions, dedupe_partido_items, enrich_partido_item
 from ..services.prediction_service import predict_partido
 
 logger = logging.getLogger(__name__)
@@ -36,22 +36,34 @@ def api_list_anyos():
 
 @router.get("/api/partidos/filtros")
 def api_partidos_filtros(
+    mundial: bool = False,
+    proximos: bool = False,
+    torneo_id: Optional[int] = None,
     tournament: Optional[str] = None,
     year: Optional[int] = None,
     season: Optional[str] = None,
     stage: Optional[str] = None,
+    group: Optional[str] = None,
+    matchday: Optional[int] = None,
+    date: Optional[str] = None,
 ):
     with Session(engine) as session:
-        conditions = []
-        if tournament:
-            conditions.append(Partido.tournament == tournament)
-        start, end = season_bounds(season=season, year=year)
-        if start and end:
-            conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
-
+        conditions = build_partido_filter_conditions(
+            session,
+            mundial=mundial,
+            proximos=proximos,
+            year=year,
+            season=season,
+            torneo_id=torneo_id,
+            tournament=tournament,
+            stage=stage,
+            group=group,
+            matchday=matchday,
+            date=date,
+        )
         stmt = select(Partido)
         if conditions:
-            stmt = stmt.where(*conditions)
+            stmt = stmt.where(and_(*conditions))
         partidos = session.exec(stmt).all()
 
         return {
@@ -80,44 +92,19 @@ def api_list_partidos(
     with Session(engine) as session:
         stmt = select(Partido).order_by(Partido.fecha_utc)
 
-        main_conditions = []
-        if mundial:
-            torneos = session.exec(
-                select(Torneo).where(or_(Torneo.nombre_canonico.ilike("%world cup%"), Torneo.nombre_canonico.ilike("%mundial%")))
-            ).all()
-            torneo_ids = [t.id for t in torneos if t.id is not None]
-            conditions = []
-            if torneo_ids:
-                conditions.append(Partido.torneo_id.in_(torneo_ids))
-            conditions.append(Partido.tournament.ilike("%world cup%"))
-            conditions.append(Partido.tournament.ilike("%mundial%"))
-            main_conditions.append(or_(*conditions))
-        if proximos:
-            main_conditions.append(Partido.estado.in_(["NS", "TIMED"]))
-
-        all_conditions = []
-        if main_conditions:
-            all_conditions.append(or_(*main_conditions))
-        if year is not None:
-            start, end = season_bounds(year=year)
-            if start and end:
-                all_conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
-        if season:
-            start, end = season_bounds(season=season)
-            if start and end:
-                all_conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
-        if torneo_id is not None:
-            all_conditions.append(Partido.torneo_id == torneo_id)
-        if tournament:
-            all_conditions.append(Partido.tournament == tournament)
-        if stage:
-            all_conditions.append(Partido.etapa == stage)
-        if group:
-            all_conditions.append(Partido.grupo == group)
-        if matchday is not None:
-            all_conditions.append(Partido.jornada == matchday)
-        if date:
-            all_conditions.append(func.date(Partido.fecha_utc) == date)
+        all_conditions = build_partido_filter_conditions(
+            session,
+            mundial=mundial,
+            proximos=proximos,
+            year=year,
+            season=season,
+            torneo_id=torneo_id,
+            tournament=tournament,
+            stage=stage,
+            group=group,
+            matchday=matchday,
+            date=date,
+        )
 
         if all_conditions:
             stmt = stmt.where(and_(*all_conditions))

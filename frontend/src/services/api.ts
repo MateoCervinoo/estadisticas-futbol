@@ -118,8 +118,12 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
     const params = new URLSearchParams()
     if (filters?.year !== undefined) params.set('year', String(filters.year))
     if (filters?.season) params.set('season', filters.season)
+    if (filters?.torneo_id !== undefined) params.set('torneo_id', String(filters.torneo_id))
     if (filters?.tournament) params.set('tournament', filters.tournament)
     if (filters?.stage) params.set('stage', filters.stage)
+    if (filters?.group) params.set('group', filters.group)
+    if (filters?.matchday !== undefined) params.set('matchday', String(filters.matchday))
+    if (filters?.date) params.set('date', filters.date)
     const query = params.toString()
     const res = await fetch(`${BASE_URL}/partidos/filtros${query ? `?${query}` : ''}`)
     if (!res.ok) {
