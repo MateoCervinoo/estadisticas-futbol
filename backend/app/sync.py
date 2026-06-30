@@ -41,6 +41,46 @@ CLUB_COMPETITIONS = {
 CLUB_SEASONS = [2023, 2024, 2025]
 
 
+def _resolve_torneo_id(session: Session, torneo_name: str, tournament: str) -> Optional[int]:
+    from .models import Torneo
+
+    names = [torneo_name, tournament]
+    if torneo_name in ("FIFA World Cup", "World Cup", "Mundial") or tournament in ("FIFA World Cup", "World Cup", "Mundial"):
+        names.extend(["FIFA World Cup", "World Cup", "Mundial"])
+
+    for name in names:
+        if not name:
+            continue
+        torneo = session.exec(
+            select(Torneo).where(Torneo.nombre_canonico == name)
+        ).first()
+        if torneo:
+            return torneo.id
+
+    if any("world cup" in str(name).lower() or "mundial" in str(name).lower() for name in names):
+        torneo = session.exec(
+            select(Torneo).where(
+                Torneo.nombre_canonico.ilike("%world cup%")
+            )
+        ).first() or session.exec(
+            select(Torneo).where(Torneo.nombre_canonico.ilike("%mundial%"))
+        ).first()
+        if torneo:
+            return torneo.id
+
+    category = "club" if torneo_name in CLUB_COMPETITIONS.values() else "seleccion"
+    tipo = "mundial" if any("world cup" in str(name).lower() or "mundial" in str(name).lower() for name in names) else ("liga" if category == "club" else "otro")
+    torneo = Torneo(
+        nombre_canonico=torneo_name or tournament,
+        nombre_api=tournament or torneo_name,
+        tipo=tipo,
+        categoria=category,
+    )
+    session.add(torneo)
+    session.flush()
+    return torneo.id
+
+
 def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
     """Parsea una ISO string que puede terminar en 'Z' a datetime con tzinfo.
 
@@ -122,16 +162,11 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
     status = normalize_status(raw_status, source="api")
     tournament = normalize_tournament(f.get('tournament')) or torneo_name
 
-    from .models import Torneo, Equipo
+    from .models import Equipo
 
     # Resolver torneo_id
-    torneo_id = None
     try:
-        torneo = session.exec(
-            select(Torneo).where(Torneo.nombre_canonico == torneo_name)
-        ).first()
-        if torneo:
-            torneo_id = torneo.id
+        torneo_id = _resolve_torneo_id(session, torneo_name, tournament)
     except Exception:
         torneo_id = None
 

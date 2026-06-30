@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/home/mateocervino/Mis proyectos/estadisticas-futbol/entrenador/entrenador.py", line 11, in <module>
-    from .pipelines.run_full_refresh import run_full_refresh
-ImportError: attempted relative import with no known parent package
