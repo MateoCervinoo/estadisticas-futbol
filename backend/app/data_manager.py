@@ -3,7 +3,7 @@ import pandas as pd
 from sqlmodel import Session, select
 # Importamos el engine de tu base de datos para cuando sumemos los partidos en vivo
 from app.database import engine
-from app.models import Partido, Equipo
+from app.models import Partido, Equipo, Torneo
 from app.data_mapper import normalize_tournament, normalize_status
 import hashlib
 import logging
@@ -258,23 +258,64 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
     # Upsert por batches
     inserted = 0
     with Session(engine) as session:
+        team_cache: dict[str, int] = {}
+        torneo_cache: dict[str, int] = {}
+
+        def resolve_team_id(name: str) -> int | None:
+            clean_name = str(name).strip()
+            if not clean_name:
+                return None
+            cache_key = clean_name.casefold()
+            if cache_key in team_cache:
+                return team_cache[cache_key]
+
+            equipo = session.exec(select(Equipo).where(Equipo.nombre_csv == clean_name)).first()
+            if not equipo:
+                equipo = session.exec(select(Equipo).where(Equipo.nombre_canonico == clean_name)).first()
+            if not equipo:
+                equipo = Equipo(
+                    nombre_canonico=clean_name,
+                    nombre_csv=clean_name,
+                    tipo="seleccion",
+                )
+                session.add(equipo)
+                session.flush()
+
+            team_cache[cache_key] = equipo.id
+            return equipo.id
+
+        def resolve_torneo_id(raw_name: str) -> int | None:
+            torneo_name = normalize_tournament(raw_name)
+            if not torneo_name:
+                return None
+            cache_key = torneo_name.casefold()
+            if cache_key in torneo_cache:
+                return torneo_cache[cache_key]
+
+            torneo = session.exec(select(Torneo).where(Torneo.nombre_canonico == torneo_name)).first()
+            if not torneo:
+                tipo = "mundial" if torneo_name == "Mundial" else "otro"
+                torneo = Torneo(
+                    nombre_canonico=torneo_name,
+                    nombre_api=str(raw_name).strip() or torneo_name,
+                    tipo=tipo,
+                    categoria="seleccion",
+                )
+                session.add(torneo)
+                session.flush()
+
+            torneo_cache[cache_key] = torneo.id
+            return torneo.id
+
         for idx, row in df.iterrows():
             fid = int(row["fixture_id"])
             hash_dedupe = row["hash_dedupe"]
-            # Intentar mapear home/away a los IDs de Equipo usando nombre_csv
-            home_team_id = None
-            away_team_id = None
-            try:
-                home_lookup = session.exec(select(Equipo).where(Equipo.nombre_csv == row["home_team"])).first()
-                if home_lookup:
-                    home_team_id = home_lookup.id
-                away_lookup = session.exec(select(Equipo).where(Equipo.nombre_csv == row["away_team"])).first()
-                if away_lookup:
-                    away_team_id = away_lookup.id
-            except Exception:
-                # No bloquear la ingesta si la tabla Equipo no existe aún
-                home_team_id = None
-                away_team_id = None
+            tournament = row.get("tournament")
+            tournament_name = normalize_tournament(tournament)
+            home_team_id = resolve_team_id(row["home_team"])
+            away_team_id = resolve_team_id(row["away_team"])
+            torneo_id = resolve_torneo_id(tournament)
+
             # Buscar partido existente por fixture_id o hash_dedupe para evitar duplicados cross-source
             existing = session.exec(select(Partido).where(Partido.fixture_id == fid)).first()
             if not existing:
@@ -293,6 +334,9 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                     existing.equipo_local_id = home_team_id
                 if away_team_id is not None:
                     existing.equipo_visitante_id = away_team_id
+                if torneo_id is not None:
+                    existing.torneo_id = torneo_id
+                existing.tournament = tournament_name
                 session.add(existing)
             else:
                 nuevo = Partido(
@@ -307,9 +351,9 @@ def ingest_historical_to_db(since_year: int = 2018, batch_size: int = 1000):
                     estado=normalize_status("FINISHED", source="csv"),
                     fuente_origen="csv_historical",
                     hash_dedupe=hash_dedupe,
+                    torneo_id=torneo_id,
+                    tournament=tournament_name,
                 )
-                if 'tournament' in row.index:
-                    nuevo.tournament = normalize_tournament(row.get('tournament'))
                 session.add(nuevo)
 
             inserted += 1

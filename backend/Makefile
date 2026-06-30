@@ -26,7 +26,7 @@ reset-db:
 		echo "Uso: make reset-db CONFIRM=reset"; \
 		exit 1; \
 	fi
-	docker compose -f ../docker-compose.yml down -v
+	docker compose -f ../docker-compose.yml down --remove-orphans -v
 	docker compose -f ../docker-compose.yml up --build -d db
 	docker compose -f ../docker-compose.yml run --rm backend python scripts/db_tasks.py migrate_db
 

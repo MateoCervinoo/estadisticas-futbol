@@ -175,19 +175,35 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
     hash_key = f"{date_str}|{(home_team or '').lower().strip()}|{(away_team or '').lower().strip()}|{tournament.lower().strip()}"
     hash_dedupe = md5(hash_key.encode("utf-8")).hexdigest()
 
-    # Mapear nombres de la API a IDs de Equipo
-    home_team_id = None
-    away_team_id = None
-    try:
-        h = session.exec(select(Equipo).where(Equipo.nombre_api == home_team)).first()
-        if h:
-            home_team_id = h.id
-        a = session.exec(select(Equipo).where(Equipo.nombre_api == away_team)).first()
-        if a:
-            away_team_id = a.id
-    except Exception:
-        home_team_id = None
-        away_team_id = None
+    category = "club" if torneo_name in CLUB_COMPETITIONS.values() else "seleccion"
+
+    def resolve_api_team_id(name: Optional[str]) -> Optional[int]:
+        clean_name = str(name).strip() if name else ""
+        if not clean_name:
+            return None
+
+        equipo = session.exec(select(Equipo).where(Equipo.nombre_api == clean_name)).first()
+        if not equipo:
+            equipo = session.exec(select(Equipo).where(Equipo.nombre_canonico == clean_name)).first()
+        if not equipo:
+            equipo = session.exec(select(Equipo).where(Equipo.nombre_csv == clean_name)).first()
+        if not equipo:
+            equipo = Equipo(
+                nombre_canonico=clean_name,
+                nombre_api=clean_name,
+                tipo=category,
+            )
+            session.add(equipo)
+            session.flush()
+        elif not equipo.nombre_api:
+            equipo.nombre_api = clean_name
+            session.add(equipo)
+            session.flush()
+
+        return equipo.id
+
+    home_team_id = resolve_api_team_id(home_team)
+    away_team_id = resolve_api_team_id(away_team)
 
     # Buscar por fixture_id o hash_dedupe
     stmt = select(Partido).where(Partido.fixture_id == fixture_id)
@@ -243,6 +259,9 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 or existing.away_crest_url != away_crest_url
                 or existing.goles_local_ht != ht_goals_home
                 or existing.goles_visitante_ht != ht_goals_away
+                or existing.equipo_local_id != home_team_id
+                or existing.equipo_visitante_id != away_team_id
+                or existing.torneo_id != torneo_id
             )
             score_changed = (
                 existing.goles_local != goals_home
@@ -279,6 +298,7 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 existing.goles_visitante_ht = ht_goals_away
                 existing.estado = status
                 existing.tournament = tournament
+                existing.torneo_id = torneo_id
                 existing.etapa = stage
                 existing.grupo = group
                 existing.jornada = matchday
@@ -290,7 +310,16 @@ def _process_fixture(session: Session, f: Dict[str, Any], client: APIFootballCli
                 if away_team_id is not None:
                     existing.equipo_visitante_id = away_team_id
 
-                if status in FINAL_STATUSES:
+                needs_metrics = (
+                    status in FINAL_STATUSES
+                    and (
+                        existing.xg_local is None
+                        or existing.xg_visitante is None
+                        or score_changed
+                        or old_status not in FINAL_STATUSES
+                    )
+                )
+                if needs_metrics:
                     metrics = client.get_match_metrics(fixture_id)
                     home_xg, away_xg = _compute_xg_from_metrics(metrics)
                     existing.xg_local = home_xg

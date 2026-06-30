@@ -6,8 +6,14 @@ import logging
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BACKEND_ROOT = PROJECT_ROOT / "backend"
+SCRIPT_PATH = Path(__file__).resolve()
+BACKEND_ROOT = SCRIPT_PATH.parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
+
+if not (BACKEND_ROOT / "app").exists():
+    # In Docker the backend is mounted directly at /app, so /app/app exists.
+    BACKEND_ROOT = Path("/app")
+    PROJECT_ROOT = BACKEND_ROOT
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 if str(PROJECT_ROOT) not in sys.path:
@@ -41,7 +47,14 @@ def load_results(since_year: int) -> None:
 def sync_data() -> None:
     init_db()
     summary = sync_fixtures_and_metrics()
-    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    compact_summary = {}
+    for key, value in summary.items():
+        if isinstance(value, list):
+            compact_summary[f"{key}_count"] = len(value)
+            compact_summary[f"{key}_sample"] = value[:10]
+        else:
+            compact_summary[key] = value
+    print(json.dumps(compact_summary, ensure_ascii=False, indent=2, default=str))
 
 
 def main() -> None:
