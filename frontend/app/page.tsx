@@ -135,10 +135,9 @@ export default function Home() {
     setModalMode('detail')
     setCurrentStats(null)
     setStatsLoading(true)
-    getPartidoEstadisticas(p.id).then((stats) => {
-      setCurrentStats(stats)
-      setStatsLoading(false)
-    })
+    getPartidoEstadisticas(p.id)
+      .then((stats) => setCurrentStats(stats))
+      .finally(() => setStatsLoading(false))
   }
 
   const closeModal = () => {
@@ -155,7 +154,13 @@ export default function Home() {
       setPredLoading(true)
       setPrediction(null)
       try {
-        if (selectedMatch.fixture_id === null || selectedMatch.fixture_id === undefined) return
+        if (selectedMatch.fixture_id === null || selectedMatch.fixture_id === undefined) {
+          setPrediction({
+            status: 'insufficient_data',
+            message: 'El partido no tiene fixture_id asociado.',
+          })
+          return
+        }
         const data = await getPartidoPrediccion(selectedMatch.fixture_id)
         if (!mounted) return
         setPrediction(data)

@@ -2,7 +2,7 @@
 // Define la interfaz Partido exactamente con los campos expuestos por el backend
 export interface Partido {
   id: number
-  fixture_id: number
+  fixture_id: number | null
   date: string
   home_team: string
   away_team: string
@@ -29,7 +29,7 @@ export const WS_URL = process.env.NEXT_PUBLIC_WS_URL || API_BASE_URL.replace(/^h
 const BASE_URL = API_URL
 
 export interface PredictionResponse {
-  status: 'ok' | 'insufficient_data' | 'model_not_loaded' | 'team_not_supported'
+  status: 'ok' | 'insufficient_data' | 'model_not_loaded' | 'team_not_supported' | 'technical_error'
   message?: string
   model_type?: 'seleccion' | 'club'
   model_version?: string | null
@@ -201,10 +201,18 @@ export async function getPartidoEstadisticas(partidoId: number): Promise<Partido
 export async function getPartidoPrediccion(fixtureId: number): Promise<PredictionResponse | null> {
   try {
     const res = await fetch(`${BASE_URL}/partidos/${fixtureId}/prediccion`)
-    if (!res.ok) return null
+    if (!res.ok) {
+      return {
+        status: 'technical_error',
+        message: `No se pudo obtener la predicción (${res.status}).`,
+      }
+    }
     return safeJson(res)
   } catch {
-    return null
+    return {
+      status: 'technical_error',
+      message: 'No se pudo conectar con el backend para obtener la predicción.',
+    }
   }
 }
 

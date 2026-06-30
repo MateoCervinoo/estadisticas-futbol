@@ -1,5 +1,7 @@
 from typing import List
 
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import text
 from sqlmodel import select
@@ -8,6 +10,11 @@ from ..db.session import Session, engine
 from ..models import Partido
 
 router = APIRouter()
+
+
+def require_debug_endpoints_enabled() -> None:
+    if os.getenv("ENABLE_DEBUG_ENDPOINTS", "").lower() not in {"1", "true", "yes"}:
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 @router.get("/health")
@@ -36,6 +43,7 @@ def health_model(request: Request):
 @router.get("/fixtures")
 def list_fixtures():
     """Devuelve todos los partidos almacenados (para debugging/frontend)."""
+    require_debug_endpoints_enabled()
     with Session(engine) as session:
         partidos: List[Partido] = session.exec(select(Partido)).all()
         return [p.dict() for p in partidos]

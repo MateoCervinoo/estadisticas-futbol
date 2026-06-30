@@ -7,6 +7,12 @@ def test_debug_endpoints_are_disabled_by_default(client):
     assert response.status_code == 404
 
 
+def test_fixtures_debug_endpoint_is_disabled_by_default(client):
+    response = client.get("/fixtures")
+
+    assert response.status_code == 404
+
+
 def test_startup_sync_is_disabled_by_default(monkeypatch):
     from app.services import sync_service
 
