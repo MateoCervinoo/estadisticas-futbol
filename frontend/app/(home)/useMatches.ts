@@ -76,7 +76,6 @@ export default function useMatches({
     })
       .then((metadata) => {
         setAniosDisponibles(metadata.years)
-        setTemporadasDisponibles(metadata.seasons)
         setAvailableDates(metadata.dates)
       })
       .catch(() => {})
