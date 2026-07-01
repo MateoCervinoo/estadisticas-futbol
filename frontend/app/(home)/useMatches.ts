@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useEffect, useState } from 'react'
-import { getPartidoFilterMetadata, getPartidos, Partido } from '../../src/services/api'
+import { getPartidoFilterMetadata, getPartidos, getTorneoTemporadas, getTorneos, Partido, Torneo } from '../../src/services/api'
 
 type UseMatchesParams = {
   selectedYear: number | undefined
@@ -36,18 +36,38 @@ export default function useMatches({
   const [availableMatchdays, setAvailableMatchdays] = useState<number[]>([])
 
   useEffect(() => {
-    getPartidoFilterMetadata()
-      .then((metadata) => {
+    Promise.all([getPartidoFilterMetadata(), getTorneos()])
+      .then(([metadata, torneos]) => {
         setAniosDisponibles(metadata.years)
         setTemporadasDisponibles(metadata.seasons)
         setAvailableDates(metadata.dates)
         setAvailableCompetitions(metadata.tournaments)
+        setAvailableTournaments(torneos)
         setAvailableStages(metadata.stages)
         setAvailableGroups(metadata.groups)
         setAvailableMatchdays(metadata.matchdays)
       })
       .catch(() => {})
   }, [])
+
+  const selectedTournament = availableTournaments.find((torneo) => torneo.nombre_canonico === competitionFilter)
+
+  useEffect(() => {
+    if (!selectedTournament?.id) {
+      setTemporadasDisponibles([])
+      return
+    }
+
+    let mounted = true
+    getTorneoTemporadas(selectedTournament.id)
+      .then((temporadas) => {
+        if (mounted) setTemporadasDisponibles(temporadas)
+      })
+      .catch(() => {
+        if (mounted) setTemporadasDisponibles([])
+      })
+    return () => { mounted = false }
+  }, [selectedTournament?.id])
 
   useEffect(() => {
     getPartidoFilterMetadata({
@@ -116,11 +136,17 @@ export default function useMatches({
   }, [selectedYear, selectedSeason, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter, hasActiveServerFilters])
 
   useEffect(() => {
+    const periodFilters = {
+      year: selectedSeason && /^\d{4}$/.test(selectedSeason) ? Number(selectedSeason) : selectedYear,
+      season: selectedSeason && !/^\d{4}$/.test(selectedSeason) ? selectedSeason : undefined,
+    }
     getPartidoFilterMetadata({
       year: selectedYear,
       season: selectedSeason !== 'Todos' ? selectedSeason : undefined,
       tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
       stage: stageFilter !== 'Todos' ? stageFilter : undefined,
+      group: groupFilter !== 'Todos' ? groupFilter : undefined,
+      matchday: matchdayFilter,
     })
       .then((metadata) => {
         setAvailableStages(metadata.stages)

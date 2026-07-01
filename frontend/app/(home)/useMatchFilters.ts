@@ -21,13 +21,17 @@ export default function useMatchFilters() {
     selectedYear !== undefined
     || (isLeagueFilter && selectedSeason !== 'Todos')
     || selectedDate
-    || competitionFilter !== 'Todos'
+    || selectedYear !== undefined
+    || selectedSeason
     || stageFilter !== 'Todos'
     || groupFilter !== 'Todos'
     || matchdayFilter !== undefined
   )
 
   useEffect(() => {
+    setSelectedYear(undefined)
+    setSelectedSeason('')
+    setSelectedDate(null)
     setStageFilter('Todos')
     setGroupFilter('Todos')
     setMatchdayFilter(undefined)

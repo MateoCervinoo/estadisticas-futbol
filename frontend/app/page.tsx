@@ -56,9 +56,6 @@ export default function Home() {
     showFilters,
     setShowFilters,
     hasActiveServerFilters,
-    showStageFilter,
-    showGroupFilter,
-    isLeagueFilter,
   } = useMatchFilters()
 
   const activeSeason = isLeagueFilter ? selectedSeason : 'Todos'
@@ -107,6 +104,8 @@ export default function Home() {
   })
 
   const allMatches = partidos ?? []
+  const selectedTournament = availableTournaments.find((torneo) => torneo.nombre_canonico === competitionFilter)
+  const selectedTournamentType = selectedTournament?.tipo ?? ''
   const competitionOptions = useMemo(
     () => ['Todos', ...Array.from(new Set(availableCompetitions.filter(Boolean)))],
     [availableCompetitions]
@@ -124,9 +123,11 @@ export default function Home() {
     [availableMatchdays]
   )
 
-  const uniqueDates = availableDates
+  const uniqueDates = competitionFilter !== 'Todos' ? availableDates : []
 
-  const showMatchdayFilter = isLeagueFilter && matchdayOptions.length > 0
+  const showStageFilter = competitionFilter !== 'Todos' && selectedTournamentType !== 'liga' && stageOptions.length > 1
+  const showGroupFilter = showStageFilter && (stageFilter === 'Todos' || stageFilter === 'GROUP_STAGE') && groupOptions.length > 1
+  const showMatchdayFilter = competitionFilter !== 'Todos' && selectedTournamentType === 'liga' && matchdayOptions.length > 0
 
   const filteredMatches = allMatches.filter((p) => !showFavoritesOnly || favorites.includes(p.id))
 
@@ -224,6 +225,8 @@ export default function Home() {
               setShowFilters={setShowFilters}
               selectedYear={selectedYear}
               setSelectedYear={setSelectedYear}
+              selectedSeason={selectedSeason}
+              setSelectedSeason={setSelectedSeason}
               aniosDisponibles={aniosDisponibles}
               selectedSeason={selectedSeason}
               setSelectedSeason={setSelectedSeason}

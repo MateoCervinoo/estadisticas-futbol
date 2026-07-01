@@ -1,8 +1,8 @@
 from __future__ import annotations
 import logging
+import math
 import signal
 from typing import Dict, List, Optional, Set
-from datetime import datetime
 
 from ..config import settings
 
@@ -115,9 +115,27 @@ class FBrefClient:
             if not team_lookup:
                 return []
 
-            def _find_row(df, opponent, venue):
+            def _get_value(row, *keys):
+                for key in keys:
+                    try:
+                        value = row.get(key)
+                    except Exception:
+                        value = None
+                    if value is not None:
+                        return value
+                return None
+
+            def _find_row(df, opponent, venue, date_str):
+                if df is None:
+                    return None
                 for _, r in df.iterrows():
-                    if r.get(("opponent", ""), "") == opponent and r.get(("venue", ""), "") == venue:
+                    row_date = _get_value(r, ("date", ""), "date")
+                    row_date_str = str(row_date.date()) if hasattr(row_date, "date") else str(row_date)[:10]
+                    if row_date_str != date_str:
+                        continue
+                    row_opponent = _get_value(r, ("opponent", ""), "opponent")
+                    row_venue = _get_value(r, ("venue", ""), "venue")
+                    if row_opponent == opponent and row_venue == venue:
                         return r
                 return None
 
@@ -138,33 +156,37 @@ class FBrefClient:
                 hd = team_lookup.get(home, {})
                 ad = team_lookup.get(away, {})
 
-                h_row = _find_row(hd.get("shooting"), away, "Home")
-                a_row = _find_row(ad.get("shooting"), home, "Away")
+                h_row = _find_row(hd.get("shooting"), away, "Home", date_str)
+                a_row = _find_row(ad.get("shooting"), home, "Away", date_str)
                 if h_row is not None:
-                    home_stats["xg"] = _safe_float(h_row.get(("Standard", "xG")) or h_row.get(("Expected", "xG")))
-                    home_stats["shots"] = _safe_int(h_row.get(("Standard", "Sh")))
-                    home_stats["shots_on_target"] = _safe_int(h_row.get(("Standard", "SoT")))
+                    home_stats["xg"] = _safe_float(_get_value(h_row, ("Standard", "xG"), ("Expected", "xG"), "xG"))
+                    home_stats["shots"] = _safe_int(_get_value(h_row, ("Standard", "Sh"), "Sh"))
+                    home_stats["shots_on_target"] = _safe_int(_get_value(h_row, ("Standard", "SoT"), "SoT"))
                 if a_row is not None:
-                    away_stats["xg"] = _safe_float(a_row.get(("Standard", "xG")) or a_row.get(("Expected", "xG")))
-                    away_stats["shots"] = _safe_int(a_row.get(("Standard", "Sh")))
-                    away_stats["shots_on_target"] = _safe_int(a_row.get(("Standard", "SoT")))
+                    away_stats["xg"] = _safe_float(_get_value(a_row, ("Standard", "xG"), ("Expected", "xG"), "xG"))
+                    away_stats["shots"] = _safe_int(_get_value(a_row, ("Standard", "Sh"), "Sh"))
+                    away_stats["shots_on_target"] = _safe_int(_get_value(a_row, ("Standard", "SoT"), "SoT"))
 
-                h_misc = _find_row(hd.get("misc"), away, "Home")
-                a_misc = _find_row(ad.get("misc"), home, "Away")
+                h_misc = _find_row(hd.get("misc"), away, "Home", date_str)
+                a_misc = _find_row(ad.get("misc"), home, "Away", date_str)
                 if h_misc is not None:
-                    home_stats["corners"] = _safe_int(h_misc.get(("Misc", "Crs")))
-                    home_stats["fouls"] = _safe_int(h_misc.get(("Misc", "Fls")))
-                    home_stats["yellow"] = _safe_int(h_misc.get(("Misc", "CrdY")))
-                    home_stats["red"] = _safe_int(h_misc.get(("Misc", "CrdR")))
+                    home_stats["corners"] = _safe_int(_get_value(h_misc, ("Misc", "Crs"), "Crs"))
+                    home_stats["fouls"] = _safe_int(_get_value(h_misc, ("Misc", "Fls"), "Fls"))
+                    home_stats["yellow"] = _safe_int(_get_value(h_misc, ("Misc", "CrdY"), "CrdY"))
+                    home_stats["red"] = _safe_int(_get_value(h_misc, ("Misc", "CrdR"), "CrdR"))
                 if a_misc is not None:
-                    away_stats["corners"] = _safe_int(a_misc.get(("Misc", "Crs")))
-                    away_stats["fouls"] = _safe_int(a_misc.get(("Misc", "Fls")))
-                    away_stats["yellow"] = _safe_int(a_misc.get(("Misc", "CrdY")))
-                    away_stats["red"] = _safe_int(a_misc.get(("Misc", "CrdR")))
+                    away_stats["corners"] = _safe_int(_get_value(a_misc, ("Misc", "Crs"), "Crs"))
+                    away_stats["fouls"] = _safe_int(_get_value(a_misc, ("Misc", "Fls"), "Fls"))
+                    away_stats["yellow"] = _safe_int(_get_value(a_misc, ("Misc", "CrdY"), "CrdY"))
+                    away_stats["red"] = _safe_int(_get_value(a_misc, ("Misc", "CrdR"), "CrdR"))
 
                 results.append({
                     "hash_dedupe": hash_dedupe,
                     "fuente": "fbref",
+                    "date": date_str,
+                    "home_team": home,
+                    "away_team": away,
+                    "league": comp,
                     "xg_local": home_stats.get("xg"),
                     "xg_visitante": away_stats.get("xg"),
                     "remates_local": home_stats.get("shots"),
@@ -198,7 +220,8 @@ def _safe_float(val) -> Optional[float]:
     if val is None:
         return None
     try:
-        return float(val)
+        value = float(val)
+        return None if math.isnan(value) else value
     except (ValueError, TypeError):
         return None
 
@@ -207,6 +230,8 @@ def _safe_int(val) -> Optional[int]:
     if val is None:
         return None
     try:
+        if math.isnan(float(val)):
+            return None
         return int(val)
     except (ValueError, TypeError):
         return None

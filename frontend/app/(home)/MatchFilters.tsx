@@ -8,6 +8,8 @@ type MatchFiltersProps = {
   setShowFilters: (value: boolean | ((current: boolean) => boolean)) => void
   selectedYear: number | undefined
   setSelectedYear: (year: number | undefined) => void
+  selectedSeason: string
+  setSelectedSeason: (season: string) => void
   aniosDisponibles: number[]
   selectedSeason: string
   setSelectedSeason: (season: string) => void
@@ -42,6 +44,8 @@ export default function MatchFilters({
   setShowFilters,
   selectedYear,
   setSelectedYear,
+  selectedSeason,
+  setSelectedSeason,
   aniosDisponibles,
   selectedSeason,
   setSelectedSeason,
@@ -86,7 +90,7 @@ export default function MatchFilters({
       <div className="d-flex align-items-center justify-content-between gap-2">
         <div>
           <div className="fw-semibold">Filtros</div>
-          <div className="small text-muted">Filtrá por año, competencia y opciones propias del torneo</div>
+          <div className="small text-muted">Primero elegí torneo; después temporada/edición y filtros propios</div>
         </div>
         <div className="d-flex align-items-center gap-2">
           {!loading && hasPartidos && (

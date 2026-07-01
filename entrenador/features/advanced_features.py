@@ -16,14 +16,17 @@ def add_advanced_features(df: pd.DataFrame,
     df = df.copy()
     df = df.sort_values("fecha_utc").reset_index(drop=True)
 
-    df["xg_local"] = stats_df["xg_local"].reindex(df.index) if "xg_local" in stats_df.columns else np.nan
-    df["xg_visitante"] = stats_df["xg_visitante"].reindex(df.index) if "xg_visitante" in stats_df.columns else np.nan
-    df["posesion_local"] = stats_df["posesion_local"].reindex(df.index) if "posesion_local" in stats_df.columns else np.nan
-    df["posesion_visitante"] = stats_df["posesion_visitante"].reindex(df.index) if "posesion_visitante" in stats_df.columns else np.nan
-    df["remates_local"] = stats_df["remates_local"].reindex(df.index) if "remates_local" in stats_df.columns else np.nan
-    df["remates_visitante"] = stats_df["remates_visitante"].reindex(df.index) if "remates_visitante" in stats_df.columns else np.nan
-    df["corners_local"] = stats_df["corners_local"].reindex(df.index) if "corners_local" in stats_df.columns else np.nan
-    df["corners_visitante"] = stats_df["corners_visitante"].reindex(df.index) if "corners_visitante" in stats_df.columns else np.nan
+    stat_cols = [
+        "xg_local", "xg_visitante", "posesion_local", "posesion_visitante",
+        "remates_local", "remates_visitante", "corners_local", "corners_visitante",
+    ]
+    if not stats_df.empty and "partido_id" in stats_df.columns:
+        merge_cols = ["partido_id"] + [c for c in stat_cols if c in stats_df.columns]
+        stats_by_match = stats_df[merge_cols].drop_duplicates("partido_id")
+        df = df.merge(stats_by_match, on="partido_id", how="left")
+    for col in stat_cols:
+        if col not in df.columns:
+            df[col] = np.nan
 
     advanced_cols = ["xg", "posesion", "remates", "corners"]
     for window in windows:

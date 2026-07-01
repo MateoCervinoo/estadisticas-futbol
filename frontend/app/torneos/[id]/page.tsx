@@ -5,7 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas, getTorneoTemporadas,
-  TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas,
+  getPartidoFilterMetadata, getTorneoCobertura,
+  TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas, PartidoFilterMetadata, TorneoCobertura,
 } from '../../../src/services/api'
 import TournamentBracket from './_components/TournamentBracket'
 import TournamentMatchCard from './_components/TournamentMatchCard'
@@ -26,6 +27,12 @@ export default function TorneoDetailPage() {
   const [torTipo, setTorTipo] = useState('')
   const [temporadas, setTemporadas] = useState<string[]>([])
   const [selectedSeason, setSelectedSeason] = useState<string>('')
+  const [stageFilter, setStageFilter] = useState('Todos')
+  const [groupFilter, setGroupFilter] = useState('Todos')
+  const [matchdayFilter, setMatchdayFilter] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
+  const [filterMetadata, setFilterMetadata] = useState<PartidoFilterMetadata | null>(null)
+  const [cobertura, setCobertura] = useState<TorneoCobertura | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('pts')
@@ -56,6 +63,31 @@ export default function TorneoDetailPage() {
     return () => { mounted = false }
   }, [torneoId])
 
+  const clearTournamentFilters = () => {
+    setStageFilter('Todos')
+    setGroupFilter('Todos')
+    setMatchdayFilter('')
+    setDateFilter('')
+  }
+
+  const selectedSeasonBaseFilters = useMemo(() => {
+    if (!selectedSeason) return null
+    return /^\d{4}$/.test(selectedSeason)
+      ? { torneo_id: torneoId, year: Number(selectedSeason) }
+      : { torneo_id: torneoId, season: selectedSeason }
+  }, [torneoId, selectedSeason])
+
+  const selectedMatchFilters = useMemo(() => {
+    if (!selectedSeasonBaseFilters) return null
+    return {
+      ...selectedSeasonBaseFilters,
+      ...(stageFilter !== 'Todos' ? { stage: stageFilter } : {}),
+      ...(groupFilter !== 'Todos' ? { group: groupFilter } : {}),
+      ...(matchdayFilter ? { matchday: Number(matchdayFilter) } : {}),
+      ...(dateFilter ? { date: dateFilter } : {}),
+    }
+  }, [selectedSeasonBaseFilters, stageFilter, groupFilter, matchdayFilter, dateFilter])
+
   useEffect(() => {
     if (!selectedSeason) return
     let mounted = true
@@ -65,17 +97,23 @@ export default function TorneoDetailPage() {
     setTablaGrupos(null)
     setBracketData(null)
     setPartidos(null)
+    setFilterMetadata(null)
+    setCobertura(null)
     const seasonFilters = /^\d{4}$/.test(selectedSeason)
       ? { year: Number(selectedSeason), grouped: true }
       : { season: selectedSeason, grouped: true }
-    const matchFilters = /^\d{4}$/.test(selectedSeason)
-      ? { torneo_id: torneoId, year: Number(selectedSeason) }
-      : { torneo_id: torneoId, season: selectedSeason }
+    if (!selectedMatchFilters || !selectedSeasonBaseFilters) return
     Promise.all([
-      getTablaPosiciones(torneoId, seasonFilters),
-      getBracket(torneoId, seasonFilters),
-      getPartidos(matchFilters),
-    ]).then(([t, b, ps]) => {
+      getTablaPosiciones(torneoId, { ...seasonFilters, ...(groupFilter !== 'Todos' ? { group: groupFilter } : {}) }),
+      getBracket(torneoId, {
+        ...seasonFilters,
+        ...(stageFilter !== 'Todos' && stageFilter !== 'GROUP_STAGE' ? { stage: stageFilter } : {}),
+        ...(dateFilter ? { date: dateFilter } : {}),
+      }),
+      getPartidos(selectedMatchFilters),
+      getPartidoFilterMetadata(selectedSeasonBaseFilters),
+      getTorneoCobertura(torneoId, selectedMatchFilters),
+    ]).then(([t, b, ps, metadata, coverage]) => {
       if (!mounted) return
       setTabla(t.tabla)
       setTablaGrupos(t.grupos ?? null)
@@ -83,6 +121,8 @@ export default function TorneoDetailPage() {
       setTorTipo(t.tipo)
       setBracketData(b.bracket)
       setPartidos(ps)
+      setFilterMetadata(metadata)
+      setCobertura(coverage)
     }).catch((err) => {
       if (!mounted) return
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los datos del torneo')
@@ -90,7 +130,17 @@ export default function TorneoDetailPage() {
       if (mounted) setLoading(false)
     })
     return () => { mounted = false }
-  }, [torneoId, selectedSeason])
+  }, [torneoId, selectedSeason, selectedSeasonBaseFilters, selectedMatchFilters, stageFilter, groupFilter, matchdayFilter, dateFilter])
+
+  const stageOptions = useMemo(() => ['Todos', ...Array.from(new Set(filterMetadata?.stages ?? []))], [filterMetadata])
+  const groupOptions = useMemo(() => ['Todos', ...Array.from(new Set(filterMetadata?.groups ?? []))], [filterMetadata])
+  const matchdayOptions = useMemo(() => filterMetadata?.matchdays ?? [], [filterMetadata])
+  const dateOptions = useMemo(() => filterMetadata?.dates ?? [], [filterMetadata])
+  const showGroupFilter = groupOptions.length > 1 && (stageFilter === 'Todos' || stageFilter === 'GROUP_STAGE')
+
+  useEffect(() => {
+    if (stageFilter !== 'Todos' && stageFilter !== 'GROUP_STAGE') setGroupFilter('Todos')
+  }, [stageFilter])
 
   const sortedTabla = useMemo(() => {
     if (!tabla) return []
@@ -129,7 +179,7 @@ export default function TorneoDetailPage() {
             className="form-select form-select-sm ms-auto"
             style={{ maxWidth: 160 }}
             value={selectedSeason}
-            onChange={(e) => setSelectedSeason(e.target.value)}
+            onChange={(e) => { setSelectedSeason(e.target.value); clearTournamentFilters() }}
             aria-label="Temporada"
           >
             {temporadas.map((season) => (
@@ -138,6 +188,79 @@ export default function TorneoDetailPage() {
           </select>
         )}
       </div>
+
+      {temporadas.length > 0 && (
+        <div className="card bg-white shadow-sm border-0 rounded-3 p-3 mb-4">
+          <div className="d-flex flex-wrap align-items-end gap-3">
+            {stageOptions.length > 1 && (
+              <label className="form-label small mb-0">
+                Etapa
+                <select className="form-select form-select-sm mt-1" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                  {stageOptions.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+                </select>
+              </label>
+            )}
+            {showGroupFilter && (
+              <label className="form-label small mb-0">
+                Grupo
+                <select className="form-select form-select-sm mt-1" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+                  {groupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
+                </select>
+              </label>
+            )}
+            {matchdayOptions.length > 0 && (
+              <label className="form-label small mb-0">
+                Jornada
+                <select className="form-select form-select-sm mt-1" value={matchdayFilter} onChange={(e) => setMatchdayFilter(e.target.value)}>
+                  <option value="">Todas</option>
+                  {matchdayOptions.map((matchday) => <option key={matchday} value={matchday}>Jornada {matchday}</option>)}
+                </select>
+              </label>
+            )}
+            {dateOptions.length > 0 && (
+              <label className="form-label small mb-0">
+                Fecha
+                <select className="form-select form-select-sm mt-1" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
+                  <option value="">Todas</option>
+                  {dateOptions.map((date) => <option key={date} value={date}>{date}</option>)}
+                </select>
+              </label>
+            )}
+            <button className="btn btn-outline-secondary btn-sm ms-auto" onClick={clearTournamentFilters}>Limpiar filtros</button>
+          </div>
+        </div>
+      )}
+
+      {cobertura && (
+        <div className="card bg-white shadow-sm border-0 rounded-3 p-3 mb-4">
+          <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
+            <div>
+              <div className="fw-semibold">Cobertura de datos</div>
+              <div className="small text-muted">Totales según la temporada y filtros seleccionados</div>
+            </div>
+            {cobertura.partidos_esperados !== null && (
+              <span className={`badge ${cobertura.temporada_completa ? 'bg-success' : 'bg-warning text-dark'}`}>
+                {cobertura.temporada_completa ? 'Temporada completa' : `Incompleta: faltan ${cobertura.partidos_faltantes}`}
+              </span>
+            )}
+          </div>
+          <div className="row g-2 small">
+            <div className="col-6 col-md-2"><strong>{cobertura.total_partidos}</strong><div className="text-muted">partidos</div></div>
+            <div className="col-6 col-md-2"><strong>{cobertura.partidos_finalizados}</strong><div className="text-muted">finalizados</div></div>
+            <div className="col-6 col-md-2"><strong>{cobertura.partidos_proximos}</strong><div className="text-muted">próximos</div></div>
+            <div className="col-6 col-md-2"><strong>{cobertura.partidos_con_escudo}</strong><div className="text-muted">con escudo</div></div>
+            <div className="col-6 col-md-2"><strong>{cobertura.partidos_con_xg}</strong><div className="text-muted">con xG</div></div>
+            <div className="col-6 col-md-2"><strong>{cobertura.partidos_esperados ?? '-'}</strong><div className="text-muted">esperados</div></div>
+          </div>
+          <div className="small text-muted mt-3">
+            Etapas disponibles: {cobertura.etapas_disponibles.length > 0 ? cobertura.etapas_disponibles.join(', ') : 'sin datos'}.
+            {torTipo === 'mundial' && !cobertura.etapas_disponibles.some((stage) => stage !== 'GROUP_STAGE') && ' La fuente todavía no trae eliminatorias para esta selección.'}
+          </div>
+          {cobertura.jornadas_disponibles.length > 0 && (
+            <div className="small text-muted mt-1">Jornadas disponibles: {cobertura.jornadas_disponibles.join(', ')}</div>
+          )}
+        </div>
+      )}
 
       <TournamentTabs activeTab={activeTab} onChange={setActiveTab} />
 
