@@ -132,6 +132,10 @@ export default function Home() {
   const showMatchdayFilter = competitionFilter !== 'Todos' && selectedTournamentType === 'liga' && matchdayOptions.length > 0
 
   const filteredMatches = allMatches.filter((p) => !showFavoritesOnly || favorites.includes(p.id))
+  const liveMatches = allMatches.filter((p) => p.status === 'IN_PLAY')
+  const upcomingMatches = allMatches.filter((p) => !isPlayed(p) && p.status !== 'IN_PLAY')
+  const playedMatches = allMatches.filter(isPlayed)
+  const featuredMatch = liveMatches[0] ?? upcomingMatches[0] ?? filteredMatches[0]
 
   const openSimulate = (p: Partido) => {
     if (isPlayed(p)) return
@@ -189,27 +193,63 @@ export default function Home() {
   }, [selectedMatch, modalMode])
 
   return (
-    <main className="min-vh-100 bg-light p-5 text-dark">
-      <div className="container mt-4">
-        <div className="d-flex align-items-center justify-content-between gap-3 mb-3">
-          <div className="d-flex align-items-center gap-3">
-            <img src="/pizarron-estadistico.png" alt="Logo Pizarrón Estadístico" className="app-logo" />
+    <main className="home-shell min-vh-100 text-dark">
+      <div className="container py-4 py-lg-5">
+        <section className="home-hero mb-4">
+          <div className="row g-4 align-items-center">
+            <div className="col-lg-7">
+              <span className="app-eyebrow">Match command center</span>
+              <h1 className="display-5 fw-black mb-3">Calendario inteligente para decidir qué partido mirar.</h1>
+              <p className="home-hero-copy mb-4">
+                Priorizá vivos, próximos y favoritos con filtros de torneo listos para análisis, exportación y vistas guardadas.
+              </p>
+              <div className="d-flex flex-wrap gap-2">
+                <span className="hero-chip danger">{liveMatches.length} en vivo</span>
+                <span className="hero-chip success">{upcomingMatches.length} próximos</span>
+                <span className="hero-chip warning">{favorites.length} favoritos</span>
+                <span className="hero-chip muted">{playedMatches.length} finalizados</span>
+              </div>
+            </div>
+            <div className="col-lg-5">
+              <div className="hero-control-card">
+                <div className="d-flex align-items-center justify-content-between gap-3 mb-3">
+                  <img src="/pizarron-estadistico.png" alt="Logo Pizarrón Estadístico" className="app-logo compact" />
+                  <div className="clock-pill text-end">
+                    <div className="small text-muted">Ahora</div>
+                    <div className="fw-semibold" suppressHydrationWarning>{formatClock(now)}</div>
+                  </div>
+                </div>
+                <div className="featured-match-card">
+                  <div className="small text-muted mb-1">Partido destacado</div>
+                  {featuredMatch ? (
+                    <>
+                      <div className="fw-bold text-truncate">{featuredMatch.home_team} vs {featuredMatch.away_team}</div>
+                      <div className="small text-muted text-truncate">{tournamentOf(featuredMatch)} · {formatDate(featuredMatch.date)}</div>
+                    </>
+                  ) : (
+                    <div className="text-muted small">Aplicá filtros para cargar una agenda destacada.</div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="clock-pill text-end">
-            <div className="small text-muted">Hoy</div>
-            <div className="fw-semibold" suppressHydrationWarning>{formatClock(now)}</div>
-          </div>
-        </div>
-        <hr className="border-top border-secondary mb-5" />
+        </section>
 
-        {error && <div className="alert alert-danger">Error: {error}</div>}
+        {error && (
+          <div className="app-alert app-alert-danger mb-4">
+            <strong>No pudimos cargar el calendario.</strong>
+            <span>{error}</span>
+            <small>Revisá que la API esté activa o probá acotar los filtros.</small>
+          </div>
+        )}
 
         <section>
-          <div className="border rounded-4 bg-white shadow-sm p-3 mb-4">
+          <div className="app-surface p-3 p-lg-4 mb-4">
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
               <div>
-                <div className="fw-semibold">Calendario</div>
-                <div className="small text-muted">Elegí el día para concentrarte en una jornada</div>
+                <span className="app-eyebrow dark">Calendario</span>
+                <h2 className="h4 fw-bold mb-1">Explorá por torneo, día y contexto</h2>
+                <div className="small text-muted">Elegí una competición para activar días, fases y jornadas disponibles.</div>
               </div>
             </div>
 
@@ -256,38 +296,39 @@ export default function Home() {
 
           {loading && hasActiveServerFilters && <FootballLoader />}
           {slowLoading && (
-            <div className="alert alert-warning">
-              La consulta está tardando más de lo esperado. Podés esperar o ajustar los filtros para acotar la búsqueda.
+            <div className="app-alert app-alert-warning">
+              <strong>La consulta está tardando más de lo esperado.</strong>
+              <span>Podés esperar o ajustar torneo, temporada o fase para acotar la búsqueda.</span>
             </div>
           )}
 
           {!loading && filteredMatches.length === 0 && (
-            <div className="text-center py-5">
+            <div className="app-empty-state my-4">
               {!hasActiveServerFilters ? (
                 <>
-                  <div className="text-muted fs-5 mb-2">Configurá un filtro para ver partidos</div>
-                  <div className="small text-muted">La app no descarga el calendario completo al iniciar</div>
+                  <strong>Configurá un filtro para ver partidos</strong>
+                  <span>La app evita descargar todo el calendario al iniciar. Elegí competición y período para empezar.</span>
                 </>
               ) : initialLoad ? (
                 <>
-                  <div className="text-muted fs-5 mb-2">Cargando partidos...</div>
-                  <div className="small text-muted">Obteniendo datos del servidor</div>
+                  <strong>Cargando partidos...</strong>
+                  <span>Obteniendo datos del servidor.</span>
                 </>
               ) : (!partidos || partidos.length === 0) ? (
                 <>
-                  <div className="text-muted fs-5 mb-2">No hay partidos disponibles</div>
-                  <div className="small text-muted">Revisá que el CSV histórico y la API estén sincronizados</div>
+                  <strong>No hay partidos disponibles</strong>
+                  <span>Revisá que el histórico y la API estén sincronizados para esta combinación.</span>
                 </>
               ) : (
                 <>
-                  <div className="text-muted fs-5 mb-2">No hay partidos con estos filtros</div>
-                  <div className="small text-muted">Probá cambiando los filtros</div>
+                  <strong>No hay partidos con estos filtros</strong>
+                  <span>Probá quitar favoritos, cambiar etapa o ampliar el período.</span>
                 </>
               )}
             </div>
           )}
 
-          <div className="row">
+          <div className="row g-3">
             {filteredMatches.map((partido) => (
               <MatchCard
                 key={partido.id}

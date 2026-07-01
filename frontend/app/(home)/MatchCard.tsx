@@ -11,22 +11,24 @@ type MatchCardProps = {
 
 export default function MatchCard({ partido, isFavorite, onToggleFavorite, onOpenDetail, onOpenSimulate }: MatchCardProps) {
   const played = isPlayed(partido)
+  const hasCrests = Boolean(partido.home_crest_url && partido.away_crest_url)
+  const confidenceLabel = played ? 'Datos cerrados' : partido.fixture_id ? 'Modelo listo' : 'Confianza limitada'
 
   return (
-    <div className="col-12 col-md-6 mb-3">
-      <div className="card bg-white text-dark shadow-sm border-0 rounded-3 mb-3 p-4 h-100">
+    <div className="col-12 col-xl-6">
+      <div className={`match-card h-100 ${isFavorite ? 'is-favorite' : ''}`}>
         <div className="d-flex justify-content-between align-items-start gap-3">
-          <div className="small text-muted d-flex align-items-center gap-2">
-            <span
-              role="button"
-              className={`${isFavorite ? 'text-warning' : 'text-muted'}`}
+          <div className="match-meta d-flex align-items-center gap-2">
+            <button
+              type="button"
+              className={`favorite-button ${isFavorite ? 'active' : ''}`}
               onClick={() => onToggleFavorite(partido.id)}
-              style={{ cursor: 'pointer', fontSize: '1rem' }}
-              title={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
+              aria-pressed={isFavorite}
+              aria-label={isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'}
             >
               {isFavorite ? '★' : '☆'}
-            </span>
-            {tournamentOf(partido)}{stageOf(partido) ? ` · ${stageOf(partido)}` : ''}{partido.group ? ` · ${groupOf(partido)}` : ''}
+            </button>
+            <span className="text-truncate">{tournamentOf(partido)}{stageOf(partido) ? ` · ${stageOf(partido)}` : ''}{partido.group ? ` · ${groupOf(partido)}` : ''}</span>
             {partido.status === 'IN_PLAY' && (
               <span className="badge bg-danger rounded-pill live-pulse small">EN VIVO</span>
             )}
@@ -34,35 +36,49 @@ export default function MatchCard({ partido, isFavorite, onToggleFavorite, onOpe
           <div className="small text-muted text-end">{formatDate(partido.date)}</div>
         </div>
 
-        <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
-          <div className="d-flex align-items-center flex-fill">
+        <div className="match-teams mt-3">
+          <div className="team-block">
             {partido.home_crest_url ? (
-              <img src={partido.home_crest_url} alt={`Escudo ${partido.home_team}`} width={22} height={22} className="me-2" />
+              <img src={partido.home_crest_url} alt={`Escudo ${partido.home_team}`} width={30} height={30} className="team-crest" />
             ) : (
-              <span className={`${flagClass(partido.home_team, partido.home_codigo_bandera)} me-2`} />
+              <span className={`${flagClass(partido.home_team, partido.home_codigo_bandera)} team-flag`} />
             )}
-            <div className="fw-semibold">{partido.home_team}</div>
+            <div className="team-name">{partido.home_team}</div>
           </div>
 
-          <div className="text-center">
+          <div className="score-block">
             {played ? (
-              <div className="fs-4 fw-bold">{formatScore(partido.home_score)} - {formatScore(partido.away_score)}</div>
+              <div className="score-value">{formatScore(partido.home_score)} - {formatScore(partido.away_score)}</div>
             ) : (
-              <div className="text-muted">vs</div>
+              <div className="vs-value">vs</div>
             )}
           </div>
 
-          <div className="d-flex align-items-center justify-content-end flex-fill">
-            <div className="fw-semibold text-end me-2">{partido.away_team}</div>
+          <div className="team-block text-end justify-content-end">
+            <div className="team-name">{partido.away_team}</div>
             {partido.away_crest_url ? (
-              <img src={partido.away_crest_url} alt={`Escudo ${partido.away_team}`} width={22} height={22} className="ms-2" />
+              <img src={partido.away_crest_url} alt={`Escudo ${partido.away_team}`} width={30} height={30} className="team-crest" />
             ) : (
-              <span className={`${flagClass(partido.away_team, partido.away_codigo_bandera)} ms-2`} />
+              <span className={`${flagClass(partido.away_team, partido.away_codigo_bandera)} team-flag`} />
             )}
           </div>
         </div>
 
-        <div className="mt-3 d-flex justify-content-end">
+        <div className="match-insights mt-3">
+          <span>{confidenceLabel}</span>
+          <span>{hasCrests ? 'Escudos OK' : 'Fallback visual'}</span>
+          {partido.matchday && <span>Jornada {partido.matchday}</span>}
+        </div>
+
+        <div className="mt-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div className="d-flex gap-2">
+            <button className="btn btn-sm btn-outline-secondary rounded-pill" disabled title="Próximamente">
+              Compartir
+            </button>
+            <button className="btn btn-sm btn-outline-secondary rounded-pill" disabled title="Próximamente">
+              Exportar
+            </button>
+          </div>
           {played ? (
             <button className="btn btn-outline-secondary rounded-pill" onClick={() => onOpenDetail(partido)}>Ver detalle</button>
           ) : (
