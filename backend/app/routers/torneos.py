@@ -1,11 +1,12 @@
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlmodel import select
 
 from ..db.session import Session, engine
-from ..models import Equipo, Partido, Torneo
+from ..models import Equipo, Partido, PartidoEstadisticas, Torneo
+from ..services.partido_service import build_partido_filter_conditions
 from ..services.tournament_service import is_finished_match, season_bounds, season_label_for_match
 
 router = APIRouter()
@@ -30,6 +31,10 @@ STAGE_LABELS = {
     "THIRD_PLACE": "Tercer Puesto",
     "FINAL": "Final",
 }
+EXPECTED_MATCHES_BY_TOURNAMENT = {
+    "premier league": 380,
+}
+UPCOMING_STATUSES = {"NS", "TIMED", "SCHEDULED"}
 
 
 def torneo_period_conditions(year: Optional[int] = None, season: Optional[str] = None) -> list:
@@ -38,6 +43,36 @@ def torneo_period_conditions(year: Optional[int] = None, season: Optional[str] =
     if start and end:
         conditions.extend([Partido.fecha_utc >= start, Partido.fecha_utc < end])
     return conditions
+
+
+def expected_matches_for_torneo(torneo: Torneo) -> int | None:
+    name = (torneo.nombre_canonico or "").casefold()
+    for expected_name, expected_count in EXPECTED_MATCHES_BY_TOURNAMENT.items():
+        if expected_name in name:
+            return expected_count
+    return None
+
+
+def tournament_filter_conditions(
+    session: Session,
+    torneo_id: int,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    stage: Optional[str] = None,
+    group: Optional[str] = None,
+    matchday: Optional[int] = None,
+    date: Optional[str] = None,
+) -> list:
+    return build_partido_filter_conditions(
+        session,
+        torneo_id=torneo_id,
+        year=year,
+        season=season,
+        stage=stage,
+        group=group,
+        matchday=matchday,
+        date=date,
+    )
 
 
 def equipo_display_name(equipo: Equipo | None, fallback_id: int | None) -> str:
@@ -136,8 +171,79 @@ def api_torneo_temporadas(torneo_id: int):
         return {"torneo_id": torneo_id, "temporadas": labels}
 
 
+@router.get("/api/torneos/{torneo_id}/cobertura")
+def api_torneo_cobertura(
+    torneo_id: int,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    stage: Optional[str] = None,
+    group: Optional[str] = None,
+    matchday: Optional[int] = None,
+    date: Optional[str] = None,
+):
+    with Session(engine) as session:
+        torneo = session.get(Torneo, torneo_id)
+        if not torneo:
+            raise HTTPException(404, "Torneo no encontrado")
+
+        conditions = tournament_filter_conditions(
+            session,
+            torneo_id=torneo_id,
+            year=year,
+            season=season,
+            stage=stage,
+            group=group,
+            matchday=matchday,
+            date=date,
+        )
+        partidos = session.exec(select(Partido).where(and_(*conditions)).order_by(Partido.fecha_utc)).all()
+        partido_ids = [p.id for p in partidos if p.id is not None]
+        stats_ids = set()
+        if partido_ids:
+            stats_ids = set(
+                session.exec(
+                    select(PartidoEstadisticas.partido_id).where(
+                        PartidoEstadisticas.partido_id.in_(partido_ids),
+                        or_(PartidoEstadisticas.xg_local.isnot(None), PartidoEstadisticas.xg_visitante.isnot(None)),
+                    )
+                ).all()
+            )
+
+        total = len(partidos)
+        expected_matches = expected_matches_for_torneo(torneo) if torneo.tipo == "liga" else None
+        complete = expected_matches is not None and total >= expected_matches
+        stages = sorted({p.etapa for p in partidos if p.etapa})
+        matchdays = sorted({p.jornada for p in partidos if p.jornada is not None})
+        groups = [] if stage and stage not in ("Todos", "GROUP_STAGE") else sorted({p.grupo for p in partidos if p.grupo})
+
+        return {
+            "torneo_id": torneo_id,
+            "torneo": torneo.nombre_canonico,
+            "tipo": torneo.tipo,
+            "season": season or (str(year) if year is not None else None),
+            "total_partidos": total,
+            "partidos_finalizados": sum(1 for p in partidos if is_finished_match(p)),
+            "partidos_proximos": sum(1 for p in partidos if str(p.estado or "").upper() in UPCOMING_STATUSES),
+            "partidos_con_escudo": sum(1 for p in partidos if p.home_crest_url or p.away_crest_url),
+            "partidos_con_xg": sum(1 for p in partidos if p.xg_local is not None or p.xg_visitante is not None or p.id in stats_ids),
+            "etapas_disponibles": stages,
+            "jornadas_disponibles": matchdays,
+            "grupos_disponibles": groups,
+            "fechas_disponibles": sorted({p.fecha_utc.date().isoformat() for p in partidos if p.fecha_utc is not None}),
+            "partidos_esperados": expected_matches,
+            "temporada_completa": complete if expected_matches is not None else None,
+            "partidos_faltantes": max(expected_matches - total, 0) if expected_matches is not None else None,
+        }
+
+
 @router.get("/api/torneos/{torneo_id}/tabla-posiciones")
-def api_torneo_tabla(torneo_id: int, year: Optional[int] = None, season: Optional[str] = None, grouped: bool = False):
+def api_torneo_tabla(
+    torneo_id: int,
+    year: Optional[int] = None,
+    season: Optional[str] = None,
+    group: Optional[str] = None,
+    grouped: bool = False,
+):
     with Session(engine) as session:
         torneo = session.get(Torneo, torneo_id)
         if not torneo:
@@ -146,6 +252,8 @@ def api_torneo_tabla(torneo_id: int, year: Optional[int] = None, season: Optiona
         conditions = [Partido.torneo_id == torneo_id, *torneo_period_conditions(year=year, season=season)]
         if grouped or torneo.tipo == "mundial":
             conditions.append(Partido.etapa == "GROUP_STAGE")
+        if group:
+            conditions.append(Partido.grupo == group)
         partidos = session.exec(select(Partido).where(*conditions)).all()
 
         response = {"torneo": torneo.nombre_canonico, "tipo": torneo.tipo, "tabla": build_tabla_rows(session, partidos)}
@@ -158,7 +266,7 @@ def api_torneo_tabla(torneo_id: int, year: Optional[int] = None, season: Optiona
 
 
 @router.get("/api/torneos/{torneo_id}/bracket")
-def api_torneo_bracket(torneo_id: int, year: Optional[int] = None, season: Optional[str] = None):
+def api_torneo_bracket(torneo_id: int, year: Optional[int] = None, season: Optional[str] = None, stage: Optional[str] = None, date: Optional[str] = None):
     with Session(engine) as session:
         torneo = session.get(Torneo, torneo_id)
         if not torneo:
@@ -170,6 +278,10 @@ def api_torneo_bracket(torneo_id: int, year: Optional[int] = None, season: Optio
             Partido.etapa != "GROUP_STAGE",
             *torneo_period_conditions(year=year, season=season),
         ]
+        if stage:
+            conditions.append(Partido.etapa == stage)
+        if date:
+            conditions.append(func.date(Partido.fecha_utc) == date)
         partidos = session.exec(select(Partido).where(*conditions).order_by(Partido.fecha_utc)).all()
         equipo_ids = {equipo_id for partido in partidos for equipo_id in (partido.equipo_local_id, partido.equipo_visitante_id) if equipo_id}
         equipos = {equipo.id: equipo for equipo in session.exec(select(Equipo).where(Equipo.id.in_(equipo_ids))).all()} if equipo_ids else {}

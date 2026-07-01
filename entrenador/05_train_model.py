@@ -41,7 +41,7 @@ def train_from_features() -> Dict[str, Any]:
 
     # --- Selecciones model ---
     if not df_sel.empty:
-        logger.info("Entrenando selecciones con %d partidos (xg: %d con datos)", len(df_sel), df_sel["xg_local"].notna().sum())
+        logger.info("Entrenando selecciones con %d partidos (xg FBref real: %d con datos)", len(df_sel), df_sel["xg_local"].notna().sum())
         model_sel = fit_dixon_coles_xg(df_sel)
         model_sel["model_type"] = "selecciones"
         save_model(model_sel, settings.MODEL_PARAMS_PATH)
@@ -58,7 +58,7 @@ def train_from_features() -> Dict[str, Any]:
 
     # --- Clubes model ---
     if not df_club.empty:
-        logger.info("Entrenando clubes con %d partidos (xg: %d con datos)", len(df_club), df_club["xg_local"].notna().sum())
+        logger.info("Entrenando clubes con %d partidos (xg FBref real: %d con datos)", len(df_club), df_club["xg_local"].notna().sum())
         model_club = fit_dixon_coles_xg(df_club)
         model_club["model_type"] = "clubes"
         club_path = _club_model_path()
@@ -166,22 +166,12 @@ def _attach_xg_stats(engine, df: pd.DataFrame) -> pd.DataFrame:
         xg_map[s.partido_id] = {
             "xg_local": float(s.xg_local) if s.xg_local is not None else None,
             "xg_visitante": float(s.xg_visitante) if s.xg_visitante is not None else None,
+            "xg_fuente": s.fuente,
         }
-
-    # Also fallback to Partido.xg_local/xg_visitante (from sync)
-    with Session(engine) as session:
-        partidos = session.exec(
-            select(Partido).where(Partido.id.in_(partido_ids))
-        ).all()
-    for p in partidos:
-        if p.id not in xg_map:
-            xgl = float(p.xg_local) if p.xg_local is not None else None
-            xgv = float(p.xg_visitante) if p.xg_visitante is not None else None
-            if xgl is not None or xgv is not None:
-                xg_map[p.id] = {"xg_local": xgl, "xg_visitante": xgv}
 
     df["xg_local"] = df["partido_id"].map(lambda pid: xg_map.get(pid, {}).get("xg_local"))
     df["xg_visitante"] = df["partido_id"].map(lambda pid: xg_map.get(pid, {}).get("xg_visitante"))
+    df["xg_fuente"] = df["partido_id"].map(lambda pid: xg_map.get(pid, {}).get("xg_fuente"))
 
     return df
 

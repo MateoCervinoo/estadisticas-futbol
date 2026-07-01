@@ -70,44 +70,28 @@ def _load_backtest_data(engine, max_matches: Optional[int] = None) -> pd.DataFra
                     PartidoEstadisticas.fuente == "fbref",
                 )
             ).first()
-            torneo = session.get(Torneo, p.torneo_id) if p.torneo_id else None
+            torneo = s.get(Torneo, p.torneo_id) if p.torneo_id else None
 
-            categoria = torneo.categoria if torneo else "seleccion"
-            xgl = float(stats.xg_local) if stats and stats.xg_local is not None else None
-            xgv = float(stats.xg_visitante) if stats and stats.xg_visitante is not None else None
-            if xgl is None and p.xg_local is not None:
-                xgl = float(p.xg_local)
-            if xgv is None and p.xg_visitante is not None:
-                xgv = float(p.xg_visitante)
+        categoria = torneo.categoria if torneo else "seleccion"
+        xgl = float(stats.xg_local) if stats and stats.xg_local is not None else None
+        xgv = float(stats.xg_visitante) if stats and stats.xg_visitante is not None else None
 
-            rows.append(
-                {
-                    "partido_id": p.id,
-                    "local_name": normalize_team(local.nombre_canonico or local.nombre_csv or "")
-                    if local
-                    else f"team_{p.equipo_local_id}",
-                    "visit_name": normalize_team(visit.nombre_canonico or visit.nombre_csv or "")
-                    if visit
-                    else f"team_{p.equipo_visitante_id}",
-                    "goles_local": p.goles_local or 0,
-                    "goles_visitante": p.goles_visitante or 0,
-                    "xg_local": xgl,
-                    "xg_visitante": xgv,
-                    "fecha_utc": p.fecha_utc,
-                    "categoria": categoria,
-                }
-            )
+        rows.append({
+            "partido_id": p.id,
+            "local_name": normalize_team(local.nombre_canonico or local.nombre_csv or "") if local else f"team_{p.equipo_local_id}",
+            "visit_name": normalize_team(visit.nombre_canonico or visit.nombre_csv or "") if visit else f"team_{p.equipo_visitante_id}",
+            "goles_local": p.goles_local or 0,
+            "goles_visitante": p.goles_visitante or 0,
+            "xg_local": xgl,
+            "xg_visitante": xgv,
+            "xg_fuente": "fbref" if xgl is not None and xgv is not None else None,
+            "fecha_utc": p.fecha_utc,
+            "categoria": categoria,
+        })
 
-        df = pd.DataFrame(rows)
-        if df.empty:
-            return df
-
-        feature_rows = session.exec(
-            select(ModelFeatures).where(
-                ModelFeatures.partido_id.in_(df["partido_id"].tolist()),
-                ModelFeatures.version_features == settings.FEATURES_VERSION,
-            )
-        ).all()
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
 
     if feature_rows:
         feature_data = []
@@ -216,6 +200,10 @@ def compute_probability_metrics(
 
     for _, row in df.iterrows():
         actual = _actual_result(row)
+    for _, r in df.iterrows():
+        gl, gv = int(r["goles_local"]), int(r["goles_visitante"])
+        actual_mat = _actual_probs(gl, gv, max_goals + 1)
+
         try:
             probs = _normalize_probs(predictor(row))
         except Exception as exc:
@@ -243,6 +231,13 @@ def compute_probability_metrics(
         "accuracy_1x2": float(correct / n),
         "calibration": calibration_ece(confidences, outcomes, n_bins=n_bins),
     }
+        # Result accuracy
+        if gl > gv:
+            actual_res = "home"
+        elif gl < gv:
+            actual_res = "away"
+        else:
+            actual_res = "draw"
 
 
 def _temporal_split(df: pd.DataFrame, test_fraction: float = 0.2, min_train: int = 50) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:

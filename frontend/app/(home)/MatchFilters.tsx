@@ -8,7 +8,10 @@ type MatchFiltersProps = {
   setShowFilters: (value: boolean | ((current: boolean) => boolean)) => void
   selectedYear: number | undefined
   setSelectedYear: (year: number | undefined) => void
+  selectedSeason: string
+  setSelectedSeason: (season: string) => void
   aniosDisponibles: number[]
+  temporadasDisponibles: string[]
   showFavoritesOnly: boolean
   setShowFavoritesOnly: (value: boolean | ((current: boolean) => boolean)) => void
   favoritesCount: number
@@ -38,7 +41,10 @@ export default function MatchFilters({
   setShowFilters,
   selectedYear,
   setSelectedYear,
+  selectedSeason,
+  setSelectedSeason,
   aniosDisponibles,
+  temporadasDisponibles,
   showFavoritesOnly,
   setShowFavoritesOnly,
   favoritesCount,
@@ -64,7 +70,7 @@ export default function MatchFilters({
       <div className="d-flex align-items-center justify-content-between gap-2">
         <div>
           <div className="fw-semibold">Filtros</div>
-          <div className="small text-muted">Filtrá por año, competencia y opciones propias del torneo</div>
+          <div className="small text-muted">Primero elegí torneo; después temporada/edición y filtros propios</div>
         </div>
         <div className="d-flex align-items-center gap-2">
           {!loading && hasPartidos && (
@@ -84,25 +90,6 @@ export default function MatchFilters({
       {showFilters && (
         <div className="pt-3">
           <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Año:</span>
-            <button
-              className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === undefined ? 'active' : ''}`}
-              onClick={() => setSelectedYear(undefined)}
-            >
-              Todos
-            </button>
-            {aniosDisponibles.map((year) => (
-              <button
-                key={year}
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === year ? 'active' : ''}`}
-                onClick={() => setSelectedYear(year)}
-              >
-                {year}
-              </button>
-            ))}
-          </div>
-
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
             <button
               className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
               onClick={() => setShowFavoritesOnly((value) => !value)}
@@ -116,7 +103,7 @@ export default function MatchFilters({
           </div>
 
           <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Competición:</span>
+            <span className="small text-muted">Torneo:</span>
             {competitionOptions.map((opt) => (
               <button
                 key={opt}
@@ -127,6 +114,48 @@ export default function MatchFilters({
               </button>
             ))}
           </div>
+
+          {competitionFilter !== 'Todos' && temporadasDisponibles.length > 0 && (
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+              <span className="small text-muted">Temporada/edición:</span>
+              <button
+                className={`btn btn-outline-secondary btn-sm rounded-pill ${!selectedSeason && selectedYear === undefined ? 'active' : ''}`}
+                onClick={() => { setSelectedSeason(''); setSelectedYear(undefined) }}
+              >
+                Todas
+              </button>
+              {temporadasDisponibles.map((season) => (
+                <button
+                  key={season}
+                  className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedSeason === season ? 'active' : ''}`}
+                  onClick={() => { setSelectedSeason(season); setSelectedYear(undefined) }}
+                >
+                  {season}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {competitionFilter !== 'Todos' && temporadasDisponibles.length === 0 && aniosDisponibles.length > 0 && (
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+              <span className="small text-muted">Año:</span>
+              <button
+                className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === undefined ? 'active' : ''}`}
+                onClick={() => setSelectedYear(undefined)}
+              >
+                Todos
+              </button>
+              {aniosDisponibles.map((year) => (
+                <button
+                  key={year}
+                  className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === year ? 'active' : ''}`}
+                  onClick={() => { setSelectedYear(year); setSelectedSeason('') }}
+                >
+                  {year}
+                </button>
+              ))}
+            </div>
+          )}
 
           {showStageFilter && (
             <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
