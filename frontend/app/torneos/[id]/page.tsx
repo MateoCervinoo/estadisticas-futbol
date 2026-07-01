@@ -9,7 +9,7 @@ import {
   TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas, PartidoFilterMetadata, TorneoCobertura,
 } from '../../../src/services/api'
 import TournamentBracket from './_components/TournamentBracket'
-import TournamentMatchCard from './_components/TournamentMatchCard'
+import TournamentCalendar, { CalendarFilters } from './_components/TournamentCalendar'
 import TournamentMatchDetailModal from './_components/TournamentMatchDetailModal'
 import TournamentStats from './_components/TournamentStats'
 import TournamentTable from './_components/TournamentTable'
@@ -37,6 +37,7 @@ export default function TorneoDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('pts')
   const [sortAsc, setSortAsc] = useState(false)
+  const [calendarFilters, setCalendarFilters] = useState<CalendarFilters>({ matchday: '', stage: '', group: '', date: '' })
   // detail modal
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
@@ -97,8 +98,7 @@ export default function TorneoDetailPage() {
     setTablaGrupos(null)
     setBracketData(null)
     setPartidos(null)
-    setFilterMetadata(null)
-    setCobertura(null)
+    setCalendarFilters({ matchday: '', stage: '', group: '', date: '' })
     const seasonFilters = /^\d{4}$/.test(selectedSeason)
       ? { year: Number(selectedSeason), grouped: true }
       : { season: selectedSeason, grouped: true }
@@ -189,77 +189,40 @@ export default function TorneoDetailPage() {
         )}
       </div>
 
-      {temporadas.length > 0 && (
-        <div className="card bg-white shadow-sm border-0 rounded-3 p-3 mb-4">
-          <div className="d-flex flex-wrap align-items-end gap-3">
-            {stageOptions.length > 1 && (
-              <label className="form-label small mb-0">
-                Etapa
-                <select className="form-select form-select-sm mt-1" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
-                  {stageOptions.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
-                </select>
-              </label>
-            )}
-            {showGroupFilter && (
-              <label className="form-label small mb-0">
-                Grupo
-                <select className="form-select form-select-sm mt-1" value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
-                  {groupOptions.map((group) => <option key={group} value={group}>{group}</option>)}
-                </select>
-              </label>
-            )}
-            {matchdayOptions.length > 0 && (
-              <label className="form-label small mb-0">
-                Jornada
-                <select className="form-select form-select-sm mt-1" value={matchdayFilter} onChange={(e) => setMatchdayFilter(e.target.value)}>
-                  <option value="">Todas</option>
-                  {matchdayOptions.map((matchday) => <option key={matchday} value={matchday}>Jornada {matchday}</option>)}
-                </select>
-              </label>
-            )}
-            {dateOptions.length > 0 && (
-              <label className="form-label small mb-0">
-                Fecha
-                <select className="form-select form-select-sm mt-1" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)}>
-                  <option value="">Todas</option>
-                  {dateOptions.map((date) => <option key={date} value={date}>{date}</option>)}
-                </select>
-              </label>
-            )}
-            <button className="btn btn-outline-secondary btn-sm ms-auto" onClick={clearTournamentFilters}>Limpiar filtros</button>
-          </div>
-        </div>
-      )}
-
-      {cobertura && (
-        <div className="card bg-white shadow-sm border-0 rounded-3 p-3 mb-4">
-          <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
-            <div>
-              <div className="fw-semibold">Cobertura de datos</div>
-              <div className="small text-muted">Totales según la temporada y filtros seleccionados</div>
+      {!loading && !error && temporadas.length > 0 && (
+        <section className="card border-0 shadow-sm rounded-4 p-3 p-md-4 mb-4 bg-white">
+          <div className="row g-3 align-items-center">
+            <div className="col-12 col-lg">
+              <div className="text-uppercase text-muted small fw-semibold">Temporada {selectedSeason}</div>
+              <h4 className="mb-1">{torName || 'Torneo'}</h4>
+              <div className="text-muted small">Calendario, posiciones, eliminatorias y leaders en una vista unificada.</div>
             </div>
-            {cobertura.partidos_esperados !== null && (
-              <span className={`badge ${cobertura.temporada_completa ? 'bg-success' : 'bg-warning text-dark'}`}>
-                {cobertura.temporada_completa ? 'Temporada completa' : `Incompleta: faltan ${cobertura.partidos_faltantes}`}
-              </span>
-            )}
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{partidos?.length ?? 0}</div>
+                <div className="small text-muted">Partidos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{tabla?.length ?? 0}</div>
+                <div className="small text-muted">Equipos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{tablaGrupos?.length || '-'}</div>
+                <div className="small text-muted">Grupos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{bracket?.reduce((sum, round) => sum + round.matches.length, 0) ?? 0}</div>
+                <div className="small text-muted">Eliminatorias</div>
+              </div>
+            </div>
           </div>
-          <div className="row g-2 small">
-            <div className="col-6 col-md-2"><strong>{cobertura.total_partidos}</strong><div className="text-muted">partidos</div></div>
-            <div className="col-6 col-md-2"><strong>{cobertura.partidos_finalizados}</strong><div className="text-muted">finalizados</div></div>
-            <div className="col-6 col-md-2"><strong>{cobertura.partidos_proximos}</strong><div className="text-muted">próximos</div></div>
-            <div className="col-6 col-md-2"><strong>{cobertura.partidos_con_escudo}</strong><div className="text-muted">con escudo</div></div>
-            <div className="col-6 col-md-2"><strong>{cobertura.partidos_con_xg}</strong><div className="text-muted">con xG</div></div>
-            <div className="col-6 col-md-2"><strong>{cobertura.partidos_esperados ?? '-'}</strong><div className="text-muted">esperados</div></div>
-          </div>
-          <div className="small text-muted mt-3">
-            Etapas disponibles: {cobertura.etapas_disponibles.length > 0 ? cobertura.etapas_disponibles.join(', ') : 'sin datos'}.
-            {torTipo === 'mundial' && !cobertura.etapas_disponibles.some((stage) => stage !== 'GROUP_STAGE') && ' La fuente todavía no trae eliminatorias para esta selección.'}
-          </div>
-          {cobertura.jornadas_disponibles.length > 0 && (
-            <div className="small text-muted mt-1">Jornadas disponibles: {cobertura.jornadas_disponibles.join(', ')}</div>
-          )}
-        </div>
+        </section>
       )}
 
       <TournamentTabs activeTab={activeTab} onChange={setActiveTab} />
@@ -270,16 +233,7 @@ export default function TorneoDetailPage() {
 
       {/* ──────── TAB: CALENDARIO ──────── */}
       {!loading && !error && activeTab === 'calendario' && (
-        <div>
-          {(!partidos || partidos.length === 0) && (
-            <div className="text-muted text-center py-5">No hay partidos para este torneo.</div>
-          )}
-          <div className="row">
-            {partidos?.map((partido) => (
-              <TournamentMatchCard key={partido.id} partido={partido} onOpenDetail={openDetail} />
-            ))}
-          </div>
-        </div>
+        <TournamentCalendar partidos={partidos} filters={calendarFilters} onFiltersChange={setCalendarFilters} onOpenDetail={openDetail} />
       )}
 
       {/* ──────── TAB: POSICIONES ──────── */}
@@ -301,7 +255,7 @@ export default function TorneoDetailPage() {
 
       {/* ──────── TAB: ESTADÍSTICAS ──────── */}
       {!loading && !error && activeTab === 'estadisticas' && (
-        <TournamentStats tabla={tabla} />
+        <TournamentStats tabla={tabla} partidos={partidos} />
       )}
 
       {/* ──── Detail Modal ──── */}
