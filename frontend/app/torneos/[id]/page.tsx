@@ -225,6 +225,38 @@ export default function TorneoDetailPage() {
         </section>
       )}
 
+      {!loading && !error && cobertura && (
+        <section className="card border-0 shadow-sm rounded-4 p-3 p-md-4 mb-4 bg-white">
+          <div className="d-flex flex-column flex-lg-row justify-content-between gap-3 mb-3">
+            <div>
+              <div className="text-uppercase text-muted small fw-semibold">Cobertura de datos</div>
+              <h5 className="mb-1">Estado de la temporada {selectedSeason}</h5>
+              <div className="text-muted small">
+                {cobertura.partidos_esperados
+                  ? `${cobertura.total_partidos}/${cobertura.partidos_esperados} partidos cargados`
+                  : `${cobertura.total_partidos} partidos cargados`}
+              </div>
+            </div>
+            {cobertura.temporada_completa !== null && (
+              <span className={`badge align-self-start ${cobertura.temporada_completa ? 'text-bg-success' : 'text-bg-warning'}`}>
+                {cobertura.temporada_completa ? 'Temporada completa' : `${cobertura.partidos_faltantes} faltantes`}
+              </span>
+            )}
+          </div>
+          <div className="row g-2">
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.partidos_finalizados}</strong><div className="small text-muted">Finalizados</div></div></div>
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.partidos_proximos}</strong><div className="small text-muted">Próximos</div></div></div>
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.partidos_con_escudo}</strong><div className="small text-muted">Con escudo</div></div></div>
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.partidos_con_xg}</strong><div className="small text-muted">Con xG</div></div></div>
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.etapas_disponibles.length || '-'}</strong><div className="small text-muted">Etapas</div></div></div>
+            <div className="col-6 col-lg-2"><div className="border rounded-3 p-2 text-center"><strong>{cobertura.jornadas_disponibles.length || '-'}</strong><div className="small text-muted">Jornadas</div></div></div>
+          </div>
+          {cobertura.tipo === 'mundial' && cobertura.etapas_disponibles.length > 0 && (
+            <div className="small text-muted mt-3">Fases disponibles: {cobertura.etapas_disponibles.join(', ')}</div>
+          )}
+        </section>
+      )}
+
       <TournamentTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {error && <div className="alert alert-danger">{error}</div>}

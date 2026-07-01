@@ -56,6 +56,7 @@ export default function Home() {
     showFilters,
     setShowFilters,
     hasActiveServerFilters,
+    isLeagueFilter,
   } = useMatchFilters()
 
   const activeSeason = isLeagueFilter ? selectedSeason : 'Todos'
@@ -69,6 +70,7 @@ export default function Home() {
     initialLoad,
     aniosDisponibles,
     temporadasDisponibles,
+    availableTournaments,
     availableDates,
     availableCompetitions,
     availableStages,
@@ -228,8 +230,6 @@ export default function Home() {
               selectedSeason={selectedSeason}
               setSelectedSeason={setSelectedSeason}
               aniosDisponibles={aniosDisponibles}
-              selectedSeason={selectedSeason}
-              setSelectedSeason={setSelectedSeason}
               temporadasDisponibles={temporadasDisponibles}
               showFavoritesOnly={showFavoritesOnly}
               setShowFavoritesOnly={setShowFavoritesOnly}

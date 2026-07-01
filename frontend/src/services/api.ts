@@ -21,7 +21,6 @@ export interface Partido {
   away_codigo_bandera?: string | null
   home_xg: number | null
   away_xg: number | null
-  matchday?: number | null
 }
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')

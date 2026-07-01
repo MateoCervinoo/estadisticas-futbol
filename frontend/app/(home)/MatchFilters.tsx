@@ -11,8 +11,6 @@ type MatchFiltersProps = {
   selectedSeason: string
   setSelectedSeason: (season: string) => void
   aniosDisponibles: number[]
-  selectedSeason: string
-  setSelectedSeason: (season: string) => void
   temporadasDisponibles: string[]
   showFavoritesOnly: boolean
   setShowFavoritesOnly: (value: boolean | ((current: boolean) => boolean)) => void
@@ -47,8 +45,6 @@ export default function MatchFilters({
   selectedSeason,
   setSelectedSeason,
   aniosDisponibles,
-  selectedSeason,
-  setSelectedSeason,
   temporadasDisponibles,
   showFavoritesOnly,
   setShowFavoritesOnly,

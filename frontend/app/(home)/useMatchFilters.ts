@@ -18,11 +18,10 @@ export default function useMatchFilters() {
   const isLeagueFilter = competitionFilter !== 'Todos' && !isWorldCupFilter && !isQualifierFilter
 
   const hasActiveServerFilters = Boolean(
-    selectedYear !== undefined
+    competitionFilter !== 'Todos'
+    || selectedYear !== undefined
     || (isLeagueFilter && selectedSeason !== 'Todos')
     || selectedDate
-    || selectedYear !== undefined
-    || selectedSeason
     || stageFilter !== 'Todos'
     || groupFilter !== 'Todos'
     || matchdayFilter !== undefined
@@ -30,13 +29,11 @@ export default function useMatchFilters() {
 
   useEffect(() => {
     setSelectedYear(undefined)
-    setSelectedSeason('')
+    setSelectedSeason('Todos')
     setSelectedDate(null)
     setStageFilter('Todos')
     setGroupFilter('Todos')
     setMatchdayFilter(undefined)
-    setSelectedYear(undefined)
-    setSelectedSeason('Todos')
   }, [competitionFilter])
 
   useEffect(() => {
