@@ -1,5 +1,5 @@
 import { Partido } from '../../../../src/services/api'
-import { flagClass, formatDate, isPlayed, rawGroupLabel, rawStageLabel } from '../../../(home)/matchPresentation'
+import { flagClass, formatDate, formatScore, isPlayed, rawGroupLabel, rawStageLabel } from '../../../(home)/matchPresentation'
 
 type TournamentMatchCardProps = {
   partido: Partido
@@ -21,17 +21,25 @@ export default function TournamentMatchCard({ partido, onOpenDetail }: Tournamen
         </div>
         <div className="d-flex align-items-center justify-content-between gap-3 mt-3">
           <div className="d-flex align-items-center flex-fill">
-            <span className={`${flagClass(partido.home_team, partido.home_codigo_bandera)} me-2`} />
+            {partido.home_crest_url ? (
+              <img src={partido.home_crest_url} alt={`Escudo ${partido.home_team}`} width={22} height={22} className="me-2" />
+            ) : (
+              <span className={`${flagClass(partido.home_team, partido.home_codigo_bandera)} me-2`} />
+            )}
             <div className="fw-semibold">{partido.home_team}</div>
           </div>
           <div className="text-center">
             {played ? (
-              <div className="fs-4 fw-bold">{partido.home_score} - {partido.away_score}</div>
+              <div className="fs-4 fw-bold">{formatScore(partido.home_score)} - {formatScore(partido.away_score)}</div>
             ) : <div className="text-muted">vs</div>}
           </div>
           <div className="d-flex align-items-center justify-content-end flex-fill">
             <div className="fw-semibold text-end me-2">{partido.away_team}</div>
-            <span className={`${flagClass(partido.away_team, partido.away_codigo_bandera)}`} />
+            {partido.away_crest_url ? (
+              <img src={partido.away_crest_url} alt={`Escudo ${partido.away_team}`} width={22} height={22} className="ms-2" />
+            ) : (
+              <span className={`${flagClass(partido.away_team, partido.away_codigo_bandera)} ms-2`} />
+            )}
           </div>
         </div>
         <div className="mt-3 d-flex justify-content-end">

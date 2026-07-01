@@ -6,8 +6,8 @@ from app.db.session import engine
 from app.models import Equipo, Partido, Torneo
 
 
-def _team(session: Session, name: str, tipo: str = "seleccion") -> Equipo:
-    equipo = Equipo(nombre_canonico=name, tipo=tipo)
+def _team(session: Session, name: str, tipo: str = "seleccion", codigo_bandera: str | None = None) -> Equipo:
+    equipo = Equipo(nombre_canonico=name, tipo=tipo, codigo_bandera=codigo_bandera)
     session.add(equipo)
     session.flush()
     return equipo
@@ -34,6 +34,8 @@ def _partido(
     goles_visitante: int | None = None,
     xg_local: float | None = None,
     xg_visitante: float | None = None,
+    home_crest_url: str | None = None,
+    away_crest_url: str | None = None,
 ) -> Partido:
     partido = Partido(
         fixture_id=fixture_id,
@@ -55,6 +57,8 @@ def _partido(
         goles_visitante=goles_visitante,
         xg_local=xg_local,
         xg_visitante=xg_visitante,
+        home_crest_url=home_crest_url,
+        away_crest_url=away_crest_url,
     )
     session.add(partido)
     return partido
@@ -125,13 +129,22 @@ def test_torneo_tabla_grouped_counts_only_finished_group_stage_matches(client):
 def test_torneo_bracket_excludes_group_stage_and_filters_period(client):
     with Session(engine) as session:
         torneo = _torneo(session, "Mundial Bracket", "mundial", "seleccion")
-        a = _team(session, "Bracket A")
-        b = _team(session, "Bracket B")
+        a = _team(session, "Bracket A", codigo_bandera="ar")
+        b = _team(session, "Bracket B", codigo_bandera="br")
         c = _team(session, "Bracket C")
         d = _team(session, "Bracket D")
 
         _partido(session, torneo, a, b, 940001, datetime(2026, 6, 12, tzinfo=timezone.utc), "GROUP_STAGE", "GROUP_A")
-        _partido(session, torneo, a, c, 940002, datetime(2026, 7, 1, tzinfo=timezone.utc), "ROUND_OF_16")
+        _partido(
+            session,
+            torneo,
+            a,
+            c,
+            940002,
+            datetime(2026, 7, 1, tzinfo=timezone.utc),
+            "ROUND_OF_16",
+            home_crest_url="https://example.com/a.svg",
+        )
         _partido(session, torneo, b, d, 940003, datetime(2026, 7, 8, tzinfo=timezone.utc), "QUARTER_FINALS")
         _partido(session, torneo, c, d, 940004, datetime(2022, 12, 18, tzinfo=timezone.utc), "FINAL")
         session.commit()
@@ -143,4 +156,6 @@ def test_torneo_bracket_excludes_group_stage_and_filters_period(client):
     bracket = response.json()["bracket"]
     assert [round_data["stage"] for round_data in bracket] == ["ROUND_OF_16", "QUARTER_FINALS"]
     assert bracket[0]["matches"][0]["home_team"] == "Bracket A"
+    assert bracket[0]["matches"][0]["home_crest_url"] == "https://example.com/a.svg"
+    assert bracket[0]["matches"][0]["home_codigo_bandera"] == "ar"
     assert bracket[1]["matches"][0]["away_team"] == "Bracket D"
