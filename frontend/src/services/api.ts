@@ -14,6 +14,7 @@ export interface Partido {
   tournament?: string | null
   stage?: string | null
   group?: string | null
+  matchday?: number | null
   home_crest_url?: string | null
   away_crest_url?: string | null
   home_codigo_bandera?: string | null

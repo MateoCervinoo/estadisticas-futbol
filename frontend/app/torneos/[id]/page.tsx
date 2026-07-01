@@ -8,7 +8,7 @@ import {
   TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas,
 } from '../../../src/services/api'
 import TournamentBracket from './_components/TournamentBracket'
-import TournamentMatchCard from './_components/TournamentMatchCard'
+import TournamentCalendar, { CalendarFilters } from './_components/TournamentCalendar'
 import TournamentMatchDetailModal from './_components/TournamentMatchDetailModal'
 import TournamentStats from './_components/TournamentStats'
 import TournamentTable from './_components/TournamentTable'
@@ -30,6 +30,7 @@ export default function TorneoDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('pts')
   const [sortAsc, setSortAsc] = useState(false)
+  const [calendarFilters, setCalendarFilters] = useState<CalendarFilters>({ matchday: '', stage: '', group: '', date: '' })
   // detail modal
   const [selectedMatch, setSelectedMatch] = useState<Partido | null>(null)
   const [currentStats, setCurrentStats] = useState<PartidoEstadisticas | null>(null)
@@ -65,6 +66,7 @@ export default function TorneoDetailPage() {
     setTablaGrupos(null)
     setBracketData(null)
     setPartidos(null)
+    setCalendarFilters({ matchday: '', stage: '', group: '', date: '' })
     const seasonFilters = /^\d{4}$/.test(selectedSeason)
       ? { year: Number(selectedSeason), grouped: true }
       : { season: selectedSeason, grouped: true }
@@ -139,6 +141,42 @@ export default function TorneoDetailPage() {
         )}
       </div>
 
+      {!loading && !error && temporadas.length > 0 && (
+        <section className="card border-0 shadow-sm rounded-4 p-3 p-md-4 mb-4 bg-white">
+          <div className="row g-3 align-items-center">
+            <div className="col-12 col-lg">
+              <div className="text-uppercase text-muted small fw-semibold">Temporada {selectedSeason}</div>
+              <h4 className="mb-1">{torName || 'Torneo'}</h4>
+              <div className="text-muted small">Calendario, posiciones, eliminatorias y leaders en una vista unificada.</div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{partidos?.length ?? 0}</div>
+                <div className="small text-muted">Partidos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{tabla?.length ?? 0}</div>
+                <div className="small text-muted">Equipos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{tablaGrupos?.length || '-'}</div>
+                <div className="small text-muted">Grupos</div>
+              </div>
+            </div>
+            <div className="col-6 col-md-3 col-lg-2">
+              <div className="border rounded-3 p-3 text-center">
+                <div className="fs-4 fw-bold">{bracket?.reduce((sum, round) => sum + round.matches.length, 0) ?? 0}</div>
+                <div className="small text-muted">Eliminatorias</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       <TournamentTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -147,16 +185,7 @@ export default function TorneoDetailPage() {
 
       {/* ──────── TAB: CALENDARIO ──────── */}
       {!loading && !error && activeTab === 'calendario' && (
-        <div>
-          {(!partidos || partidos.length === 0) && (
-            <div className="text-muted text-center py-5">No hay partidos para este torneo.</div>
-          )}
-          <div className="row">
-            {partidos?.map((partido) => (
-              <TournamentMatchCard key={partido.id} partido={partido} onOpenDetail={openDetail} />
-            ))}
-          </div>
-        </div>
+        <TournamentCalendar partidos={partidos} filters={calendarFilters} onFiltersChange={setCalendarFilters} onOpenDetail={openDetail} />
       )}
 
       {/* ──────── TAB: POSICIONES ──────── */}
@@ -178,7 +207,7 @@ export default function TorneoDetailPage() {
 
       {/* ──────── TAB: ESTADÍSTICAS ──────── */}
       {!loading && !error && activeTab === 'estadisticas' && (
-        <TournamentStats tabla={tabla} />
+        <TournamentStats tabla={tabla} partidos={partidos} />
       )}
 
       {/* ──── Detail Modal ──── */}
