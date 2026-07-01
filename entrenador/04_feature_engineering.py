@@ -62,16 +62,22 @@ def _load_stats(session: Session, partido_ids: list) -> pd.DataFrame:
     for s in stats:
         rows.append({
             "partido_id": s.partido_id,
-            "xg_local": float(s.xg_local) if s.xg_local else None,
-            "xg_visitante": float(s.xg_visitante) if s.xg_visitante else None,
-            "posesion_local": float(s.posesion_local) if s.posesion_local else None,
-            "posesion_visitante": float(s.posesion_visitante) if s.posesion_visitante else None,
+            "fuente": s.fuente,
+            "xg_local": float(s.xg_local) if s.xg_local is not None else None,
+            "xg_visitante": float(s.xg_visitante) if s.xg_visitante is not None else None,
+            "posesion_local": float(s.posesion_local) if s.posesion_local is not None else None,
+            "posesion_visitante": float(s.posesion_visitante) if s.posesion_visitante is not None else None,
             "remates_local": s.remates_local,
             "remates_visitante": s.remates_visitante,
             "corners_local": s.corners_local,
             "corners_visitante": s.corners_visitante,
         })
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    source_priority = {"fbref": 0, "understat": 1}
+    df["_source_priority"] = df["fuente"].map(source_priority).fillna(99)
+    return df.sort_values(["partido_id", "_source_priority"]).drop_duplicates("partido_id")
 
 
 def _load_elo(session: Session) -> pd.DataFrame:

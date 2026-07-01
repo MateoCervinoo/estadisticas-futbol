@@ -21,6 +21,7 @@ export interface Partido {
   away_codigo_bandera?: string | null
   home_xg: number | null
   away_xg: number | null
+  matchday?: number | null
 }
 
 export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
@@ -72,11 +73,31 @@ export interface PartidoFilters {
 
 export interface PartidoFilterMetadata {
   years: number[]
+  seasons: string[]
   tournaments: string[]
   stages: string[]
   groups: string[]
   matchdays: number[]
   dates: string[]
+}
+
+export interface TorneoCobertura {
+  torneo_id: number
+  torneo: string
+  tipo: string
+  season: string | null
+  total_partidos: number
+  partidos_finalizados: number
+  partidos_proximos: number
+  partidos_con_escudo: number
+  partidos_con_xg: number
+  etapas_disponibles: string[]
+  jornadas_disponibles: number[]
+  grupos_disponibles: string[]
+  fechas_disponibles: string[]
+  partidos_esperados: number | null
+  temporada_completa: boolean | null
+  partidos_faltantes: number | null
 }
 
 export async function getPartidos(filters?: number | PartidoFilters): Promise<Partido[]> {
@@ -137,11 +158,12 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
     const query = params.toString()
     const res = await fetch(`${BASE_URL}/partidos/filtros${query ? `?${query}` : ''}`)
     if (!res.ok) {
-      return { years: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
+      return { years: [], seasons: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
     }
     const data = await safeJson(res)
     return {
       years: Array.isArray(data.years) ? data.years : [],
+      seasons: Array.isArray(data.seasons) ? data.seasons : [],
       tournaments: Array.isArray(data.tournaments) ? data.tournaments : [],
       stages: Array.isArray(data.stages) ? data.stages : [],
       groups: Array.isArray(data.groups) ? data.groups : [],
@@ -149,7 +171,7 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
       dates: Array.isArray(data.dates) ? data.dates : [],
     }
   } catch {
-    return { years: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
+    return { years: [], seasons: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
   }
 }
 
@@ -325,11 +347,12 @@ export async function getTorneos(): Promise<Torneo[]> {
 
 export async function getTablaPosiciones(
   torneoId: number,
-  filters?: { year?: number; season?: string; grouped?: boolean }
+  filters?: { year?: number; season?: string; group?: string; grouped?: boolean }
 ): Promise<{ torneo: string; tipo: string; tabla: TablaRow[]; grupos?: TablaGrupo[] }> {
   const params = new URLSearchParams()
   if (filters?.year !== undefined) params.set('year', String(filters.year))
   if (filters?.season) params.set('season', filters.season)
+  if (filters?.group) params.set('group', filters.group)
   if (filters?.grouped) params.set('grouped', 'true')
   const query = params.toString()
   const res = await fetch(`${BASE_URL}/torneos/${torneoId}/tabla-posiciones${query ? `?${query}` : ''}`)
@@ -339,14 +362,30 @@ export async function getTablaPosiciones(
 
 export async function getBracket(
   torneoId: number,
-  filters?: { year?: number; season?: string }
+  filters?: { year?: number; season?: string; stage?: string; date?: string }
 ): Promise<{ torneo: string; bracket: BracketRound[] }> {
   const params = new URLSearchParams()
   if (filters?.year !== undefined) params.set('year', String(filters.year))
   if (filters?.season) params.set('season', filters.season)
+  if (filters?.stage) params.set('stage', filters.stage)
+  if (filters?.date) params.set('date', filters.date)
   const query = params.toString()
   const res = await fetch(`${BASE_URL}/torneos/${torneoId}/bracket${query ? `?${query}` : ''}`)
   await assertOk(res, 'Failed to fetch bracket')
+  return safeJson(res)
+}
+
+export async function getTorneoCobertura(torneoId: number, filters?: PartidoFilters): Promise<TorneoCobertura> {
+  const params = new URLSearchParams()
+  if (filters?.year !== undefined) params.set('year', String(filters.year))
+  if (filters?.season) params.set('season', filters.season)
+  if (filters?.stage) params.set('stage', filters.stage)
+  if (filters?.group) params.set('group', filters.group)
+  if (filters?.matchday !== undefined) params.set('matchday', String(filters.matchday))
+  if (filters?.date) params.set('date', filters.date)
+  const query = params.toString()
+  const res = await fetch(`${BASE_URL}/torneos/${torneoId}/cobertura${query ? `?${query}` : ''}`)
+  await assertOk(res, 'Failed to fetch cobertura de torneo')
   return safeJson(res)
 }
 

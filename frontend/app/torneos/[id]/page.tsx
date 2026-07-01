@@ -5,7 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas, getTorneoTemporadas,
-  TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas,
+  getPartidoFilterMetadata, getTorneoCobertura,
+  TablaRow, TablaGrupo, BracketRound, Partido, PartidoEstadisticas, PartidoFilterMetadata, TorneoCobertura,
 } from '../../../src/services/api'
 import TournamentBracket from './_components/TournamentBracket'
 import TournamentCalendar, { CalendarFilters } from './_components/TournamentCalendar'
@@ -26,6 +27,12 @@ export default function TorneoDetailPage() {
   const [torTipo, setTorTipo] = useState('')
   const [temporadas, setTemporadas] = useState<string[]>([])
   const [selectedSeason, setSelectedSeason] = useState<string>('')
+  const [stageFilter, setStageFilter] = useState('Todos')
+  const [groupFilter, setGroupFilter] = useState('Todos')
+  const [matchdayFilter, setMatchdayFilter] = useState('')
+  const [dateFilter, setDateFilter] = useState('')
+  const [filterMetadata, setFilterMetadata] = useState<PartidoFilterMetadata | null>(null)
+  const [cobertura, setCobertura] = useState<TorneoCobertura | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('pts')
@@ -57,6 +64,31 @@ export default function TorneoDetailPage() {
     return () => { mounted = false }
   }, [torneoId])
 
+  const clearTournamentFilters = () => {
+    setStageFilter('Todos')
+    setGroupFilter('Todos')
+    setMatchdayFilter('')
+    setDateFilter('')
+  }
+
+  const selectedSeasonBaseFilters = useMemo(() => {
+    if (!selectedSeason) return null
+    return /^\d{4}$/.test(selectedSeason)
+      ? { torneo_id: torneoId, year: Number(selectedSeason) }
+      : { torneo_id: torneoId, season: selectedSeason }
+  }, [torneoId, selectedSeason])
+
+  const selectedMatchFilters = useMemo(() => {
+    if (!selectedSeasonBaseFilters) return null
+    return {
+      ...selectedSeasonBaseFilters,
+      ...(stageFilter !== 'Todos' ? { stage: stageFilter } : {}),
+      ...(groupFilter !== 'Todos' ? { group: groupFilter } : {}),
+      ...(matchdayFilter ? { matchday: Number(matchdayFilter) } : {}),
+      ...(dateFilter ? { date: dateFilter } : {}),
+    }
+  }, [selectedSeasonBaseFilters, stageFilter, groupFilter, matchdayFilter, dateFilter])
+
   useEffect(() => {
     if (!selectedSeason) return
     let mounted = true
@@ -70,14 +102,18 @@ export default function TorneoDetailPage() {
     const seasonFilters = /^\d{4}$/.test(selectedSeason)
       ? { year: Number(selectedSeason), grouped: true }
       : { season: selectedSeason, grouped: true }
-    const matchFilters = /^\d{4}$/.test(selectedSeason)
-      ? { torneo_id: torneoId, year: Number(selectedSeason) }
-      : { torneo_id: torneoId, season: selectedSeason }
+    if (!selectedMatchFilters || !selectedSeasonBaseFilters) return
     Promise.all([
-      getTablaPosiciones(torneoId, seasonFilters),
-      getBracket(torneoId, seasonFilters),
-      getPartidos(matchFilters),
-    ]).then(([t, b, ps]) => {
+      getTablaPosiciones(torneoId, { ...seasonFilters, ...(groupFilter !== 'Todos' ? { group: groupFilter } : {}) }),
+      getBracket(torneoId, {
+        ...seasonFilters,
+        ...(stageFilter !== 'Todos' && stageFilter !== 'GROUP_STAGE' ? { stage: stageFilter } : {}),
+        ...(dateFilter ? { date: dateFilter } : {}),
+      }),
+      getPartidos(selectedMatchFilters),
+      getPartidoFilterMetadata(selectedSeasonBaseFilters),
+      getTorneoCobertura(torneoId, selectedMatchFilters),
+    ]).then(([t, b, ps, metadata, coverage]) => {
       if (!mounted) return
       setTabla(t.tabla)
       setTablaGrupos(t.grupos ?? null)
@@ -85,6 +121,8 @@ export default function TorneoDetailPage() {
       setTorTipo(t.tipo)
       setBracketData(b.bracket)
       setPartidos(ps)
+      setFilterMetadata(metadata)
+      setCobertura(coverage)
     }).catch((err) => {
       if (!mounted) return
       setError(err instanceof Error ? err.message : 'No se pudieron cargar los datos del torneo')
@@ -92,7 +130,17 @@ export default function TorneoDetailPage() {
       if (mounted) setLoading(false)
     })
     return () => { mounted = false }
-  }, [torneoId, selectedSeason])
+  }, [torneoId, selectedSeason, selectedSeasonBaseFilters, selectedMatchFilters, stageFilter, groupFilter, matchdayFilter, dateFilter])
+
+  const stageOptions = useMemo(() => ['Todos', ...Array.from(new Set(filterMetadata?.stages ?? []))], [filterMetadata])
+  const groupOptions = useMemo(() => ['Todos', ...Array.from(new Set(filterMetadata?.groups ?? []))], [filterMetadata])
+  const matchdayOptions = useMemo(() => filterMetadata?.matchdays ?? [], [filterMetadata])
+  const dateOptions = useMemo(() => filterMetadata?.dates ?? [], [filterMetadata])
+  const showGroupFilter = groupOptions.length > 1 && (stageFilter === 'Todos' || stageFilter === 'GROUP_STAGE')
+
+  useEffect(() => {
+    if (stageFilter !== 'Todos' && stageFilter !== 'GROUP_STAGE') setGroupFilter('Todos')
+  }, [stageFilter])
 
   const sortedTabla = useMemo(() => {
     if (!tabla) return []
@@ -131,7 +179,7 @@ export default function TorneoDetailPage() {
             className="form-select form-select-sm ms-auto"
             style={{ maxWidth: 160 }}
             value={selectedSeason}
-            onChange={(e) => setSelectedSeason(e.target.value)}
+            onChange={(e) => { setSelectedSeason(e.target.value); clearTournamentFilters() }}
             aria-label="Temporada"
           >
             {temporadas.map((season) => (

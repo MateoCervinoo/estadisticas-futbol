@@ -159,3 +159,67 @@ def test_torneo_bracket_excludes_group_stage_and_filters_period(client):
     assert bracket[0]["matches"][0]["home_crest_url"] == "https://example.com/a.svg"
     assert bracket[0]["matches"][0]["home_codigo_bandera"] == "ar"
     assert bracket[1]["matches"][0]["away_team"] == "Bracket D"
+
+
+def test_torneo_cobertura_reports_league_completeness_and_filters(client):
+    with Session(engine) as session:
+        torneo = _torneo(session, "Premier League Cobertura", "liga", "club")
+        local = _team(session, "Coverage Local", "club")
+        away = _team(session, "Coverage Away", "club")
+
+        _partido(
+            session,
+            torneo,
+            local,
+            away,
+            950001,
+            datetime(2024, 8, 1, tzinfo=timezone.utc),
+            "REGULAR",
+            estado="FT",
+            goles_local=1,
+            goles_visitante=0,
+            xg_local=1.1,
+            home_crest_url="https://example.com/local.svg",
+        ).jornada = 1
+        _partido(session, torneo, away, local, 950002, datetime(2025, 5, 1, tzinfo=timezone.utc), "REGULAR", estado="NS").jornada = 2
+        _partido(session, torneo, local, away, 950003, datetime(2025, 8, 1, tzinfo=timezone.utc), "REGULAR", estado="NS").jornada = 1
+        session.commit()
+        torneo_id = torneo.id
+
+    response = client.get(f"/api/torneos/{torneo_id}/cobertura?season=2024/25")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_partidos"] == 2
+    assert data["partidos_finalizados"] == 1
+    assert data["partidos_proximos"] == 1
+    assert data["partidos_con_escudo"] == 1
+    assert data["partidos_con_xg"] == 1
+    assert data["jornadas_disponibles"] == [1, 2]
+    assert data["partidos_esperados"] == 380
+    assert data["temporada_completa"] is False
+    assert data["partidos_faltantes"] == 378
+
+
+def test_torneo_cobertura_reports_world_cup_available_phases(client):
+    with Session(engine) as session:
+        torneo = _torneo(session, "Mundial Cobertura", "mundial", "seleccion")
+        a = _team(session, "Coverage Argentina")
+        b = _team(session, "Coverage Brazil")
+        c = _team(session, "Coverage France")
+        d = _team(session, "Coverage Germany")
+
+        _partido(session, torneo, a, b, 960001, datetime(2026, 6, 12, tzinfo=timezone.utc), "GROUP_STAGE", "GROUP_A", "NS")
+        _partido(session, torneo, c, d, 960002, datetime(2026, 6, 13, tzinfo=timezone.utc), "GROUP_STAGE", "GROUP_B", "NS")
+        session.commit()
+        torneo_id = torneo.id
+
+    response = client.get(f"/api/torneos/{torneo_id}/cobertura?year=2026")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_partidos"] == 2
+    assert data["etapas_disponibles"] == ["GROUP_STAGE"]
+    assert data["grupos_disponibles"] == ["GROUP_A", "GROUP_B"]
+    assert data["partidos_esperados"] is None
+    assert data["temporada_completa"] is None

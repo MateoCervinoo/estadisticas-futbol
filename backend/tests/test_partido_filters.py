@@ -99,6 +99,26 @@ def test_partidos_filters_support_season(client):
     assert filtros_response.status_code == 200
     assert [p["fixture_id"] for p in partidos_response.json()] == [910001, 910002]
     assert filtros_response.json()["matchdays"] == [1, 2]
+    assert filtros_response.json()["seasons"] == ["2024/25"]
+
+
+def test_partidos_metadata_exposes_league_seasons(client):
+    with Session(engine) as session:
+        torneo = Torneo(nombre_canonico="Liga Season Test", nombre_api="Liga Season Test", tipo="liga", categoria="club")
+        local = Equipo(nombre_canonico="Season Local Test", tipo="club")
+        away = Equipo(nombre_canonico="Season Away Test", tipo="club")
+        session.add_all([torneo, local, away])
+        session.flush()
+
+        _create_match(session, torneo, local, away, 920001, datetime(2025, 8, 1, 20, tzinfo=timezone.utc), "REGULAR", None, 1, status="FT")
+        _create_match(session, torneo, away, local, 920002, datetime(2026, 5, 1, 20, tzinfo=timezone.utc), "REGULAR", None, 2, status="FT")
+        session.commit()
+
+    response = client.get("/api/partidos/filtros?tournament=Liga%20Season%20Test")
+
+    assert response.status_code == 200
+    assert response.json()["years"] == [2025, 2026]
+    assert response.json()["seasons"] == ["2025/26"]
 
 
 def test_dedupe_partido_items_prefers_api_fixture_with_media():

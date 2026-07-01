@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import math
 from typing import Dict, List, Optional, Set
 from datetime import datetime, timezone
 
@@ -83,6 +84,10 @@ class UnderstatClient:
                 results.append({
                     "hash_dedupe": hash_dedupe,
                     "fuente": "understat",
+                    "date": date_str,
+                    "home_team": home,
+                    "away_team": away,
+                    "league": comp,
                     "xg_local": _safe_float(sr.get("home_xg")),
                     "xg_visitante": _safe_float(sr.get("away_xg")),
                     "goles_local": _safe_int(sr.get("home_goals")),
@@ -113,7 +118,8 @@ def _safe_float(val) -> Optional[float]:
     if val is None:
         return None
     try:
-        return float(val)
+        value = float(val)
+        return None if math.isnan(value) else value
     except (ValueError, TypeError):
         return None
 
@@ -122,6 +128,8 @@ def _safe_int(val) -> Optional[int]:
     if val is None:
         return None
     try:
+        if math.isnan(float(val)):
+            return None
         return int(val)
     except (ValueError, TypeError):
         return None

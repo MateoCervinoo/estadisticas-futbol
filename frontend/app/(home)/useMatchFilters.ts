@@ -3,25 +3,40 @@ import { TOURNAMENT_LABELS } from './matchPresentation'
 
 export default function useMatchFilters() {
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined)
+  const [selectedSeason, setSelectedSeason] = useState<string>('Todos')
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [competitionFilter, setCompetitionFilter] = useState<string>('Todos')
   const [stageFilter, setStageFilter] = useState<string>('Todos')
   const [groupFilter, setGroupFilter] = useState<string>('Todos')
   const [matchdayFilter, setMatchdayFilter] = useState<number | undefined>(undefined)
   const [showFilters, setShowFilters] = useState<boolean>(false)
+  const selectedCompetitionLabel = competitionFilter === 'Todos'
+    ? ''
+    : (TOURNAMENT_LABELS[competitionFilter] ?? competitionFilter)
+  const isWorldCupFilter = selectedCompetitionLabel === 'Mundial' || /world cup/i.test(competitionFilter)
+  const isQualifierFilter = /clasific|qualification|qualifier/i.test(selectedCompetitionLabel) || /qualification|qualifier/i.test(competitionFilter)
+  const isLeagueFilter = competitionFilter !== 'Todos' && !isWorldCupFilter && !isQualifierFilter
+
   const hasActiveServerFilters = Boolean(
     selectedYear !== undefined
+    || (isLeagueFilter && selectedSeason !== 'Todos')
     || selectedDate
-    || competitionFilter !== 'Todos'
+    || selectedYear !== undefined
+    || selectedSeason
     || stageFilter !== 'Todos'
     || groupFilter !== 'Todos'
     || matchdayFilter !== undefined
   )
 
   useEffect(() => {
+    setSelectedYear(undefined)
+    setSelectedSeason('')
+    setSelectedDate(null)
     setStageFilter('Todos')
     setGroupFilter('Todos')
     setMatchdayFilter(undefined)
+    setSelectedYear(undefined)
+    setSelectedSeason('Todos')
   }, [competitionFilter])
 
   useEffect(() => {
@@ -30,16 +45,11 @@ export default function useMatchFilters() {
     }
   }, [stageFilter])
 
-  const selectedCompetitionLabel = competitionFilter === 'Todos'
-    ? ''
-    : (TOURNAMENT_LABELS[competitionFilter] ?? competitionFilter)
-  const isWorldCupFilter = selectedCompetitionLabel === 'Mundial' || /world cup/i.test(competitionFilter)
-  const isQualifierFilter = /clasific|qualification|qualifier/i.test(selectedCompetitionLabel) || /qualification|qualifier/i.test(competitionFilter)
-  const isLeagueFilter = competitionFilter !== 'Todos' && !isWorldCupFilter && !isQualifierFilter
-
   return {
     selectedYear,
     setSelectedYear,
+    selectedSeason,
+    setSelectedSeason,
     selectedDate,
     setSelectedDate,
     competitionFilter,
