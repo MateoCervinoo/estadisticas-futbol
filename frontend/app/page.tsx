@@ -41,6 +41,8 @@ export default function Home() {
   const {
     selectedYear,
     setSelectedYear,
+    selectedSeason,
+    setSelectedSeason,
     selectedDate,
     setSelectedDate,
     competitionFilter,
@@ -59,6 +61,8 @@ export default function Home() {
     isLeagueFilter,
   } = useMatchFilters()
 
+  const activeSeason = isLeagueFilter ? selectedSeason : 'Todos'
+
   const {
     partidos,
     setPartidos,
@@ -67,6 +71,7 @@ export default function Home() {
     slowLoading,
     initialLoad,
     aniosDisponibles,
+    temporadasDisponibles,
     availableDates,
     availableCompetitions,
     availableStages,
@@ -74,6 +79,7 @@ export default function Home() {
     availableMatchdays,
   } = useMatches({
     selectedYear,
+    selectedSeason: activeSeason,
     selectedDate,
     competitionFilter,
     stageFilter,
@@ -90,6 +96,7 @@ export default function Home() {
   useMatchNotifications({
     hasActiveServerFilters,
     selectedYear,
+    selectedSeason: activeSeason,
     selectedDate,
     competitionFilter,
     stageFilter,
@@ -218,6 +225,9 @@ export default function Home() {
               selectedYear={selectedYear}
               setSelectedYear={setSelectedYear}
               aniosDisponibles={aniosDisponibles}
+              selectedSeason={selectedSeason}
+              setSelectedSeason={setSelectedSeason}
+              temporadasDisponibles={temporadasDisponibles}
               showFavoritesOnly={showFavoritesOnly}
               setShowFavoritesOnly={setShowFavoritesOnly}
               favoritesCount={favorites.length}
@@ -225,6 +235,7 @@ export default function Home() {
               competitionOptions={competitionOptions}
               competitionFilter={competitionFilter}
               setCompetitionFilter={setCompetitionFilter}
+              isLeagueFilter={isLeagueFilter}
               showStageFilter={showStageFilter}
               stageOptions={stageOptions}
               stageFilter={stageFilter}

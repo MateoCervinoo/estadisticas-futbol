@@ -71,6 +71,7 @@ export interface PartidoFilters {
 
 export interface PartidoFilterMetadata {
   years: number[]
+  seasons: string[]
   tournaments: string[]
   stages: string[]
   groups: string[]
@@ -136,11 +137,12 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
     const query = params.toString()
     const res = await fetch(`${BASE_URL}/partidos/filtros${query ? `?${query}` : ''}`)
     if (!res.ok) {
-      return { years: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
+      return { years: [], seasons: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
     }
     const data = await safeJson(res)
     return {
       years: Array.isArray(data.years) ? data.years : [],
+      seasons: Array.isArray(data.seasons) ? data.seasons : [],
       tournaments: Array.isArray(data.tournaments) ? data.tournaments : [],
       stages: Array.isArray(data.stages) ? data.stages : [],
       groups: Array.isArray(data.groups) ? data.groups : [],
@@ -148,7 +150,7 @@ export async function getPartidoFilterMetadata(filters?: PartidoFilters): Promis
       dates: Array.isArray(data.dates) ? data.dates : [],
     }
   } catch {
-    return { years: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
+    return { years: [], seasons: [], tournaments: [], stages: [], groups: [], matchdays: [], dates: [] }
   }
 }
 
