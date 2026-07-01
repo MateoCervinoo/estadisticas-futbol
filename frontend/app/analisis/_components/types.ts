@@ -5,14 +5,21 @@ export type SelectedTeam = { id: number; nombre: string }
 
 export type EvolutionPoint = {
   match_index: number
+  fecha?: string | null
+  resultado?: 'H' | 'A' | 'D'
+  gf?: number
+  gc?: number
   rolling_gf_avg: number
   rolling_gc_avg: number
+  xg_favor?: number | null
+  xg_contra?: number | null
 }
 
 export type DistributionPoint = {
   goles: number
   actual_pct: number
   poisson_pct: number
+  actual_partidos?: number
 }
 
 export type XgVsRealRow = {

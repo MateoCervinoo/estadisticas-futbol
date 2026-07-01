@@ -5,22 +5,21 @@ type AnalysisTabsProps = {
   onChange: (tab: AnalysisTab) => void
 }
 
-const tabs: { key: AnalysisTab; label: string }[] = [
-  { key: 'evolution', label: 'Evolución Ataque/Defensa' },
-  { key: 'xg-vs-real', label: 'xG vs Goles Reales' },
-  { key: 'distribucion', label: 'Distribución Poisson' },
+const tabs: { key: AnalysisTab; label: string; kicker: string }[] = [
+  { key: 'evolution', label: 'Evolución', kicker: 'forma y xG' },
+  { key: 'xg-vs-real', label: 'Ranking xG', kicker: 'calidad vs eficacia' },
+  { key: 'distribucion', label: 'Distribución', kicker: 'goles esperados' },
 ]
 
 export default function AnalysisTabs({ tab, onChange }: AnalysisTabsProps) {
   return (
-    <ul className="nav nav-tabs mb-3">
+    <div className="analysis-tabs mb-4" role="tablist" aria-label="Vistas de análisis">
       {tabs.map((item) => (
-        <li key={item.key} className="nav-item">
-          <button className={`nav-link ${tab === item.key ? 'active fw-semibold' : ''}`} onClick={() => onChange(item.key)}>
-            {item.label}
-          </button>
-        </li>
+        <button key={item.key} className={`analysis-tab ${tab === item.key ? 'active' : ''}`} onClick={() => onChange(item.key)}>
+          <span>{item.label}</span>
+          <small>{item.kicker}</small>
+        </button>
       ))}
-    </ul>
+    </div>
   )
 }
