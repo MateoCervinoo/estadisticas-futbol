@@ -70,8 +70,8 @@ export default function useMatchNotifications({
             const filters = matchFiltersRef.current
             if (!filters.hasActiveServerFilters) return
             getPartidos({
-              year: filters.selectedSeason && /^\d{4}$/.test(filters.selectedSeason) ? Number(filters.selectedSeason) : filters.selectedYear,
-              season: filters.selectedSeason && !/^\d{4}$/.test(filters.selectedSeason) ? filters.selectedSeason : undefined,
+              year: filters.selectedYear,
+              season: filters.selectedSeason !== 'Todos' ? filters.selectedSeason : undefined,
               date: filters.selectedDate ?? undefined,
               tournament: filters.competitionFilter !== 'Todos' ? filters.competitionFilter : undefined,
               stage: filters.stageFilter !== 'Todos' ? filters.stageFilter : undefined,

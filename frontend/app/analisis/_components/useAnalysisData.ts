@@ -14,6 +14,10 @@ export default function useAnalysisData() {
   const [evolLoading, setEvolLoading] = useState(false)
   const [xgLoading, setXgLoading] = useState(false)
   const [distLoading, setDistLoading] = useState(false)
+  const [teamSearchError, setTeamSearchError] = useState<string | null>(null)
+  const [evolError, setEvolError] = useState<string | null>(null)
+  const [xgError, setXgError] = useState<string | null>(null)
+  const [distError, setDistError] = useState<string | null>(null)
 
   useEffect(() => {
     if (teamQuery.trim().length < 2) {
@@ -22,9 +26,14 @@ export default function useAnalysisData() {
     }
     const timer = setTimeout(async () => {
       try {
+        setTeamSearchError(null)
         const res = await fetch(`${API_URL}/equipos/search?q=${encodeURIComponent(teamQuery)}&tipo=${teamType}`)
-        if (res.ok) setTeams(await res.json())
-      } catch {}
+        if (!res.ok) throw new Error('No se pudo buscar equipos')
+        setTeams(await res.json())
+      } catch {
+        setTeams([])
+        setTeamSearchError('No se pudo buscar equipos. Probá nuevamente.')
+      }
     }, 300)
     return () => clearTimeout(timer)
   }, [teamQuery, teamType])
@@ -32,38 +41,52 @@ export default function useAnalysisData() {
   useEffect(() => {
     if (!selectedTeam) return
     setEvolLoading(true)
+    setEvolError(null)
     fetch(`${API_URL}/equipos/${selectedTeam.id}/evolution`)
-      .then((response) => response.ok ? response.json() : null)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('evolution')))
       .then((data) => {
         if (data) setEvolution(data.evolution || [])
         setEvolLoading(false)
       })
-      .catch(() => setEvolLoading(false))
+      .catch(() => {
+        setEvolution([])
+        setEvolError('No se pudo cargar la evolución del equipo.')
+        setEvolLoading(false)
+      })
   }, [selectedTeam])
 
   useEffect(() => {
     if (!selectedTeam) return
     setDistLoading(true)
+    setDistError(null)
     fetch(`${API_URL}/equipos/${selectedTeam.id}/distribucion`)
-      .then((response) => response.ok ? response.json() : null)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('distribucion')))
       .then((data) => {
         if (data) setDistribucion(data.distribucion || [])
         setDistLoading(false)
       })
-      .catch(() => setDistLoading(false))
+      .catch(() => {
+        setDistribucion([])
+        setDistError('No se pudo cargar la distribución de goles.')
+        setDistLoading(false)
+      })
   }, [selectedTeam])
 
   useEffect(() => {
-    if (tab !== 'xg-vs-real') return
     setXgLoading(true)
+    setXgError(null)
     fetch(`${API_URL}/analytics/xg-vs-real?tipo=${teamType}`)
-      .then((response) => response.ok ? response.json() : null)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('xg')))
       .then((data) => {
         if (data) setXgData(data)
         setXgLoading(false)
       })
-      .catch(() => setXgLoading(false))
-  }, [tab, teamType])
+      .catch(() => {
+        setXgData([])
+        setXgError('No se pudo cargar el ranking xG.')
+        setXgLoading(false)
+      })
+  }, [teamType])
 
   const selectTeam = useCallback((team: SelectedTeam) => {
     setSelectedTeam(team)
@@ -79,6 +102,10 @@ export default function useAnalysisData() {
     setEvolution([])
     setDistribucion([])
     setXgData([])
+    setTeamSearchError(null)
+    setEvolError(null)
+    setXgError(null)
+    setDistError(null)
   }, [])
 
   const downloadCSV = useCallback(() => {
@@ -112,6 +139,10 @@ export default function useAnalysisData() {
     evolLoading,
     xgLoading,
     distLoading,
+    teamSearchError,
+    evolError,
+    xgError,
+    distError,
     selectTeam,
     changeTeamType,
     downloadCSV,

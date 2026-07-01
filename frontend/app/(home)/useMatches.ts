@@ -29,7 +29,6 @@ export default function useMatches({
   const [initialLoad, setInitialLoad] = useState<boolean>(true)
   const [aniosDisponibles, setAniosDisponibles] = useState<number[]>([])
   const [temporadasDisponibles, setTemporadasDisponibles] = useState<string[]>([])
-  const [availableTournaments, setAvailableTournaments] = useState<Torneo[]>([])
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [availableCompetitions, setAvailableCompetitions] = useState<string[]>([])
   const [availableStages, setAvailableStages] = useState<string[]>([])
@@ -40,6 +39,7 @@ export default function useMatches({
     Promise.all([getPartidoFilterMetadata(), getTorneos()])
       .then(([metadata, torneos]) => {
         setAniosDisponibles(metadata.years)
+        setTemporadasDisponibles(metadata.seasons)
         setAvailableDates(metadata.dates)
         setAvailableCompetitions(metadata.tournaments)
         setAvailableTournaments(torneos)
@@ -70,6 +70,18 @@ export default function useMatches({
   }, [selectedTournament?.id])
 
   useEffect(() => {
+    getPartidoFilterMetadata({
+      tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
+    })
+      .then((metadata) => {
+        setAniosDisponibles(metadata.years)
+        setTemporadasDisponibles(metadata.seasons)
+        setAvailableDates(metadata.dates)
+      })
+      .catch(() => {})
+  }, [competitionFilter])
+
+  useEffect(() => {
     if (!hasActiveServerFilters) {
       setPartidos(null)
       setLoading(false)
@@ -89,8 +101,8 @@ export default function useMatches({
     }, 6000)
 
     getPartidos({
-      year: selectedSeason && /^\d{4}$/.test(selectedSeason) ? Number(selectedSeason) : selectedYear,
-      season: selectedSeason && !/^\d{4}$/.test(selectedSeason) ? selectedSeason : undefined,
+      year: selectedYear,
+      season: selectedSeason !== 'Todos' ? selectedSeason : undefined,
       date: selectedDate ?? undefined,
       tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
       stage: stageFilter !== 'Todos' ? stageFilter : undefined,
@@ -129,7 +141,8 @@ export default function useMatches({
       season: selectedSeason && !/^\d{4}$/.test(selectedSeason) ? selectedSeason : undefined,
     }
     getPartidoFilterMetadata({
-      ...periodFilters,
+      year: selectedYear,
+      season: selectedSeason !== 'Todos' ? selectedSeason : undefined,
       tournament: competitionFilter !== 'Todos' ? competitionFilter : undefined,
       stage: stageFilter !== 'Todos' ? stageFilter : undefined,
       group: groupFilter !== 'Todos' ? groupFilter : undefined,
@@ -142,7 +155,7 @@ export default function useMatches({
         setAvailableDates(metadata.dates)
       })
       .catch(() => {})
-  }, [selectedYear, selectedSeason, competitionFilter, stageFilter, groupFilter, matchdayFilter])
+  }, [selectedYear, selectedSeason, competitionFilter, stageFilter])
 
   return {
     partidos,
@@ -153,7 +166,6 @@ export default function useMatches({
     initialLoad,
     aniosDisponibles,
     temporadasDisponibles,
-    availableTournaments,
     availableDates,
     availableCompetitions,
     availableStages,

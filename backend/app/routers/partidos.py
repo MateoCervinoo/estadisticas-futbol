@@ -8,14 +8,14 @@ from sqlalchemy import and_
 from sqlmodel import select
 
 from ..db.session import Session, engine
-from ..models import Partido, PartidoEstadisticas
+from ..models import Partido, PartidoEstadisticas, Torneo
 from ..services.data_quality_service import (
     DEFAULT_BAD_RECORDS_PATH,
     build_data_quality_report,
     purge_invalid_placeholder_fixtures,
     repair_partido_identity,
 )
-from ..services.partido_service import build_partido_filter_conditions, dedupe_partido_items, enrich_partido_item
+from ..services.partido_service import build_partido_filter_conditions, dedupe_partido_items, enrich_partido_item, season_label_for_match
 from ..services.prediction_service import predict_partido
 
 logger = logging.getLogger(__name__)
@@ -65,9 +65,19 @@ def api_partidos_filtros(
         if conditions:
             stmt = stmt.where(and_(*conditions))
         partidos = session.exec(stmt).all()
+        torneos = {
+            torneo.id: torneo
+            for torneo in session.exec(select(Torneo)).all()
+            if torneo.id is not None
+        }
 
         return {
             "years": sorted({p.fecha_utc.year for p in partidos if p.fecha_utc is not None}),
+            "seasons": sorted({
+                season_label_for_match(p.fecha_utc, torneos[p.torneo_id].tipo if p.torneo_id in torneos else None)
+                for p in partidos
+                if p.fecha_utc is not None
+            }, reverse=True),
             "tournaments": sorted({p.tournament for p in partidos if p.tournament}),
             "stages": sorted({p.etapa for p in partidos if p.etapa}),
             "groups": [] if stage and stage not in ("Todos", "GROUP_STAGE") else sorted({p.grupo for p in partidos if p.grupo}),

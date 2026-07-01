@@ -11,6 +11,8 @@ type MatchFiltersProps = {
   selectedSeason: string
   setSelectedSeason: (season: string) => void
   aniosDisponibles: number[]
+  selectedSeason: string
+  setSelectedSeason: (season: string) => void
   temporadasDisponibles: string[]
   showFavoritesOnly: boolean
   setShowFavoritesOnly: (value: boolean | ((current: boolean) => boolean)) => void
@@ -19,6 +21,7 @@ type MatchFiltersProps = {
   competitionOptions: string[]
   competitionFilter: string
   setCompetitionFilter: (competition: string) => void
+  isLeagueFilter: boolean
   showStageFilter: boolean
   stageOptions: string[]
   stageFilter: string
@@ -44,6 +47,8 @@ export default function MatchFilters({
   selectedSeason,
   setSelectedSeason,
   aniosDisponibles,
+  selectedSeason,
+  setSelectedSeason,
   temporadasDisponibles,
   showFavoritesOnly,
   setShowFavoritesOnly,
@@ -52,6 +57,7 @@ export default function MatchFilters({
   competitionOptions,
   competitionFilter,
   setCompetitionFilter,
+  isLeagueFilter,
   showStageFilter,
   stageOptions,
   stageFilter,
@@ -65,6 +71,20 @@ export default function MatchFilters({
   matchdayFilter,
   setMatchdayFilter,
 }: MatchFiltersProps) {
+  const hasCompetition = competitionFilter !== 'Todos'
+  const periodOptions = isLeagueFilter ? temporadasDisponibles : aniosDisponibles
+  const periodLabel = isLeagueFilter ? 'Temporada:' : 'Año:'
+
+  const selectYear = (year: number | undefined) => {
+    setSelectedSeason('Todos')
+    setSelectedYear(year)
+  }
+
+  const selectSeason = (season: string) => {
+    setSelectedYear(undefined)
+    setSelectedSeason(season)
+  }
+
   return (
     <div className="border-top mt-3 pt-3">
       <div className="d-flex align-items-center justify-content-between gap-2">
@@ -90,20 +110,7 @@ export default function MatchFilters({
       {showFilters && (
         <div className="pt-3">
           <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <button
-              className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
-              onClick={() => setShowFavoritesOnly((value) => !value)}
-              title="Filtra sobre los partidos ya cargados por los filtros activos"
-            >
-              ⭐ Mis Partidos {favoritesCount > 0 && `(${favoritesCount})`}
-            </button>
-            {showFavoritesOnly && !hasActiveServerFilters && (
-              <span className="small text-muted">Aplicá un filtro de servidor para cargar partidos favoritos.</span>
-            )}
-          </div>
-
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Torneo:</span>
+            <span className="small text-muted">Competición:</span>
             {competitionOptions.map((opt) => (
               <button
                 key={opt}
@@ -115,47 +122,53 @@ export default function MatchFilters({
             ))}
           </div>
 
-          {competitionFilter !== 'Todos' && temporadasDisponibles.length > 0 && (
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-              <span className="small text-muted">Temporada/edición:</span>
-              <button
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${!selectedSeason && selectedYear === undefined ? 'active' : ''}`}
-                onClick={() => { setSelectedSeason(''); setSelectedYear(undefined) }}
-              >
-                Todas
-              </button>
-              {temporadasDisponibles.map((season) => (
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <span className="small text-muted">{periodLabel}</span>
+            <button
+              className={`btn btn-outline-secondary btn-sm rounded-pill ${(isLeagueFilter ? selectedSeason === 'Todos' : selectedYear === undefined) ? 'active' : ''}`}
+              onClick={() => isLeagueFilter ? selectSeason('Todos') : selectYear(undefined)}
+              disabled={!hasCompetition}
+            >
+              {isLeagueFilter ? 'Todas' : 'Todos'}
+            </button>
+            {hasCompetition ? (
+              isLeagueFilter ? temporadasDisponibles.map((season) => (
                 <button
                   key={season}
                   className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedSeason === season ? 'active' : ''}`}
-                  onClick={() => { setSelectedSeason(season); setSelectedYear(undefined) }}
+                  onClick={() => selectSeason(season)}
                 >
                   {season}
                 </button>
-              ))}
-            </div>
-          )}
-
-          {competitionFilter !== 'Todos' && temporadasDisponibles.length === 0 && aniosDisponibles.length > 0 && (
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-              <span className="small text-muted">Año:</span>
-              <button
-                className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === undefined ? 'active' : ''}`}
-                onClick={() => setSelectedYear(undefined)}
-              >
-                Todos
-              </button>
-              {aniosDisponibles.map((year) => (
+              )) : aniosDisponibles.map((year) => (
                 <button
                   key={year}
                   className={`btn btn-outline-secondary btn-sm rounded-pill ${selectedYear === year ? 'active' : ''}`}
-                  onClick={() => { setSelectedYear(year); setSelectedSeason('') }}
+                  onClick={() => selectYear(year)}
                 >
                   {year}
                 </button>
-              ))}
-            </div>
-          )}
+              ))
+            ) : (
+              <span className="small text-muted">Primero elegí una competición.</span>
+            )}
+            {hasCompetition && periodOptions.length === 0 && (
+              <span className="small text-muted">No hay opciones disponibles.</span>
+            )}
+          </div>
+
+          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <button
+              className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
+              onClick={() => setShowFavoritesOnly((value) => !value)}
+              title="Filtra sobre los partidos ya cargados por los filtros activos"
+            >
+              ⭐ Mis Partidos {favoritesCount > 0 && `(${favoritesCount})`}
+            </button>
+            {showFavoritesOnly && !hasActiveServerFilters && (
+              <span className="small text-muted">Aplicá un filtro de servidor para cargar partidos favoritos.</span>
+            )}
+          </div>
 
           {showStageFilter && (
             <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
