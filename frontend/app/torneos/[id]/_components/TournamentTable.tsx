@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { TablaGrupo, TablaRow } from '../../../../src/services/api'
+import { flagClass } from '../../../(home)/matchPresentation'
 
 type TournamentTableProps = {
   tabla: TablaRow[] | null
@@ -42,7 +43,7 @@ function Tabla({ rows, sortCol, sortAsc, onToggleSort }: { rows: TablaRow[]; sor
                 <td className="text-muted">{index + 1}</td>
                 <td>
                   <Link href={`/equipos/${row.equipo_id}`} className="text-decoration-none text-dark d-flex align-items-center gap-2">
-                    {row.codigo_bandera && <span className={`fi fi-${row.codigo_bandera}`} />}
+                    <span className={flagClass(row.equipo, row.codigo_bandera)} />
                     {row.equipo}
                   </Link>
                 </td>
