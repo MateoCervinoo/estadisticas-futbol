@@ -49,10 +49,6 @@ def _load_backtest_data(engine, max_matches: int = None) -> pd.DataFrame:
         categoria = torneo.categoria if torneo else "seleccion"
         xgl = float(stats.xg_local) if stats and stats.xg_local is not None else None
         xgv = float(stats.xg_visitante) if stats and stats.xg_visitante is not None else None
-        if xgl is None and p.xg_local is not None:
-            xgl = float(p.xg_local)
-        if xgv is None and p.xg_visitante is not None:
-            xgv = float(p.xg_visitante)
 
         rows.append({
             "partido_id": p.id,
@@ -62,6 +58,7 @@ def _load_backtest_data(engine, max_matches: int = None) -> pd.DataFrame:
             "goles_visitante": p.goles_visitante or 0,
             "xg_local": xgl,
             "xg_visitante": xgv,
+            "xg_fuente": "fbref" if xgl is not None and xgv is not None else None,
             "fecha_utc": p.fecha_utc,
             "categoria": categoria,
         })
@@ -112,7 +109,7 @@ def compute_metrics(df: pd.DataFrame, model: Dict[str, Any],
 
     for _, r in df.iterrows():
         gl, gv = int(r["goles_local"]), int(r["goles_visitante"])
-        actual_mat = _actual_probs(gl, gv, max_goals)
+        actual_mat = _actual_probs(gl, gv, max_goals + 1)
 
         try:
             P = predict_match(r["local_name"], r["visit_name"], model,
@@ -130,11 +127,11 @@ def compute_metrics(df: pd.DataFrame, model: Dict[str, Any],
 
         # Result accuracy
         if gl > gv:
-            actual_res = "H"
+            actual_res = "home"
         elif gl < gv:
-            actual_res = "A"
+            actual_res = "away"
         else:
-            actual_res = "D"
+            actual_res = "draw"
 
         probs = predict_score_proba(r["local_name"], r["visit_name"], model,
                                     max_goals=max_goals, neutral=True)
