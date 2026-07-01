@@ -182,7 +182,20 @@ def api_torneo_bracket(torneo_id: int, year: Optional[int] = None, season: Optio
             visitante = equipos.get(partido.equipo_visitante_id)
             name_local = partido.home_team or equipo_display_name(local, partido.equipo_local_id)
             name_away = partido.away_team or equipo_display_name(visitante, partido.equipo_visitante_id)
-            rondas[etapa].append({"partido_id": partido.id, "home_team": name_local, "away_team": name_away, "home_score": partido.goles_local, "away_score": partido.goles_visitante, "estado": partido.estado, "fecha": partido.fecha_utc.isoformat() if partido.fecha_utc else None, "grupo": partido.grupo})
+            rondas[etapa].append({
+                "partido_id": partido.id,
+                "home_team": name_local,
+                "away_team": name_away,
+                "home_crest_url": partido.home_crest_url,
+                "away_crest_url": partido.away_crest_url,
+                "home_codigo_bandera": local.codigo_bandera if local else None,
+                "away_codigo_bandera": visitante.codigo_bandera if visitante else None,
+                "home_score": partido.goles_local,
+                "away_score": partido.goles_visitante,
+                "estado": partido.estado,
+                "fecha": partido.fecha_utc.isoformat() if partido.fecha_utc else None,
+                "grupo": partido.grupo,
+            })
 
         bracket = [{"stage": etapa, "label": STAGE_LABELS.get(etapa, etapa), "order": STAGE_ORDER.get(etapa, 99), "matches": rondas[etapa]} for etapa in sorted(rondas.keys(), key=lambda e: STAGE_ORDER.get(e, 99))]
         return {"torneo": torneo.nombre_canonico, "bracket": bracket}

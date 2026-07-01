@@ -253,6 +253,10 @@ export interface BracketMatch {
   partido_id: number
   home_team: string
   away_team: string
+  home_crest_url?: string | null
+  away_crest_url?: string | null
+  home_codigo_bandera?: string | null
+  away_codigo_bandera?: string | null
   home_score: number | null
   away_score: number | null
   estado: string
