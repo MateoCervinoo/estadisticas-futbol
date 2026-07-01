@@ -29,6 +29,7 @@ export default function useMatches({
   const [initialLoad, setInitialLoad] = useState<boolean>(true)
   const [aniosDisponibles, setAniosDisponibles] = useState<number[]>([])
   const [temporadasDisponibles, setTemporadasDisponibles] = useState<string[]>([])
+  const [availableTournaments, setAvailableTournaments] = useState<Torneo[]>([])
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [availableCompetitions, setAvailableCompetitions] = useState<string[]>([])
   const [availableStages, setAvailableStages] = useState<string[]>([])
@@ -136,10 +137,6 @@ export default function useMatches({
   }, [selectedYear, selectedSeason, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter, hasActiveServerFilters])
 
   useEffect(() => {
-    const periodFilters = {
-      year: selectedSeason && /^\d{4}$/.test(selectedSeason) ? Number(selectedSeason) : selectedYear,
-      season: selectedSeason && !/^\d{4}$/.test(selectedSeason) ? selectedSeason : undefined,
-    }
     getPartidoFilterMetadata({
       year: selectedYear,
       season: selectedSeason !== 'Todos' ? selectedSeason : undefined,
@@ -166,6 +163,7 @@ export default function useMatches({
     initialLoad,
     aniosDisponibles,
     temporadasDisponibles,
+    availableTournaments,
     availableDates,
     availableCompetitions,
     availableStages,
