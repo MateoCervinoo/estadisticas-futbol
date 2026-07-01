@@ -6,6 +6,7 @@ import { ToastMessage } from './useFavorites'
 type NotificationFilters = {
   hasActiveServerFilters: boolean
   selectedYear: number | undefined
+  selectedSeason: string
   selectedDate: string | null
   competitionFilter: string
   stageFilter: string
@@ -21,6 +22,7 @@ type UseMatchNotificationsParams = NotificationFilters & {
 export default function useMatchNotifications({
   hasActiveServerFilters,
   selectedYear,
+  selectedSeason,
   selectedDate,
   competitionFilter,
   stageFilter,
@@ -32,6 +34,7 @@ export default function useMatchNotifications({
   const matchFiltersRef = useRef<NotificationFilters>({
     hasActiveServerFilters,
     selectedYear,
+    selectedSeason,
     selectedDate,
     competitionFilter,
     stageFilter,
@@ -43,13 +46,14 @@ export default function useMatchNotifications({
     matchFiltersRef.current = {
       hasActiveServerFilters,
       selectedYear,
+      selectedSeason,
       selectedDate,
       competitionFilter,
       stageFilter,
       groupFilter,
       matchdayFilter,
     }
-  }, [hasActiveServerFilters, selectedYear, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter])
+  }, [hasActiveServerFilters, selectedYear, selectedSeason, selectedDate, competitionFilter, stageFilter, groupFilter, matchdayFilter])
 
   useEffect(() => {
     let ws: WebSocket | null = null
@@ -66,7 +70,8 @@ export default function useMatchNotifications({
             const filters = matchFiltersRef.current
             if (!filters.hasActiveServerFilters) return
             getPartidos({
-              year: filters.selectedYear,
+              year: filters.selectedSeason && /^\d{4}$/.test(filters.selectedSeason) ? Number(filters.selectedSeason) : filters.selectedYear,
+              season: filters.selectedSeason && !/^\d{4}$/.test(filters.selectedSeason) ? filters.selectedSeason : undefined,
               date: filters.selectedDate ?? undefined,
               tournament: filters.competitionFilter !== 'Todos' ? filters.competitionFilter : undefined,
               stage: filters.stageFilter !== 'Todos' ? filters.stageFilter : undefined,
