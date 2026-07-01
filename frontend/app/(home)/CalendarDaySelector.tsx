@@ -9,7 +9,7 @@ type CalendarDaySelectorProps = {
 export default function CalendarDaySelector({ uniqueDates, selectedDate, onSelectDate }: CalendarDaySelectorProps) {
   return (
     <div className="day-selector d-flex gap-2 overflow-auto pb-2">
-      {uniqueDates.length === 0 && <div className="text-muted">No hay días cargados</div>}
+      {uniqueDates.length === 0 && <div className="calendar-empty-note">No hay días cargados todavía</div>}
       {uniqueDates.map((iso) => {
         const active = selectedDate === iso
         const label = formatDateLabel(`${iso}T12:00:00Z`)
@@ -17,7 +17,7 @@ export default function CalendarDaySelector({ uniqueDates, selectedDate, onSelec
         return (
           <button
             key={iso}
-            className={`btn day-selector-btn text-start ${active ? 'btn-primary' : 'btn-outline-secondary'}`}
+            className={`btn day-selector-btn text-start ${active ? 'active' : ''}`}
             onClick={() => onSelectDate(active ? null : iso)}
           >
             <div className="small text-uppercase opacity-75">Día</div>

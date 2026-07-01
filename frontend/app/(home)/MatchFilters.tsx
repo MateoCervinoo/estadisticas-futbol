@@ -82,15 +82,15 @@ export default function MatchFilters({
   }
 
   return (
-    <div className="border-top mt-3 pt-3">
+    <div className="filters-panel mt-3 pt-3">
       <div className="d-flex align-items-center justify-content-between gap-2">
         <div>
-          <div className="fw-semibold">Filtros</div>
+          <div className="fw-semibold">Filtros de agenda</div>
           <div className="small text-muted">Primero elegí torneo; después temporada/edición y filtros propios</div>
         </div>
         <div className="d-flex align-items-center gap-2">
           {!loading && hasPartidos && (
-            <span className="badge bg-secondary rounded-pill">{filteredCount} partidos</span>
+            <span className="badge app-count-badge rounded-pill">{filteredCount} partidos</span>
           )}
           <button
             type="button"
@@ -105,8 +105,8 @@ export default function MatchFilters({
 
       {showFilters && (
         <div className="pt-3">
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">Competición:</span>
+          <div className="filter-group mb-3">
+            <span className="filter-label">Competición</span>
             {competitionOptions.map((opt) => (
               <button
                 key={opt}
@@ -118,8 +118,8 @@ export default function MatchFilters({
             ))}
           </div>
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-            <span className="small text-muted">{periodLabel}</span>
+          <div className="filter-group mb-3">
+            <span className="filter-label">{periodLabel.replace(':', '')}</span>
             <button
               className={`btn btn-outline-secondary btn-sm rounded-pill ${(isLeagueFilter ? selectedSeason === 'Todos' : selectedYear === undefined) ? 'active' : ''}`}
               onClick={() => isLeagueFilter ? selectSeason('Todos') : selectYear(undefined)}
@@ -153,13 +153,13 @@ export default function MatchFilters({
             )}
           </div>
 
-          <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+          <div className="filter-group mb-3">
             <button
               className={`btn btn-sm rounded-pill ${showFavoritesOnly ? 'btn-warning' : 'btn-outline-warning'}`}
               onClick={() => setShowFavoritesOnly((value) => !value)}
               title="Filtra sobre los partidos ya cargados por los filtros activos"
             >
-              ⭐ Mis Partidos {favoritesCount > 0 && `(${favoritesCount})`}
+              ★ Mis partidos {favoritesCount > 0 && `(${favoritesCount})`}
             </button>
             {showFavoritesOnly && !hasActiveServerFilters && (
               <span className="small text-muted">Aplicá un filtro de servidor para cargar partidos favoritos.</span>
@@ -167,8 +167,8 @@ export default function MatchFilters({
           </div>
 
           {showStageFilter && (
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-              <span className="small text-muted">Etapa:</span>
+            <div className="filter-group mb-3">
+              <span className="filter-label">Etapa</span>
               {stageOptions.map((opt) => (
                 <button
                   key={`stage-${opt}`}
@@ -182,8 +182,8 @@ export default function MatchFilters({
           )}
 
           {showGroupFilter && (
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-              <span className="small text-muted">Grupo:</span>
+            <div className="filter-group mb-3">
+              <span className="filter-label">Grupo</span>
               {groupOptions.map((opt) => (
                 <button
                   key={`group-${opt}`}
@@ -197,8 +197,8 @@ export default function MatchFilters({
           )}
 
           {showMatchdayFilter && (
-            <div className="d-flex flex-wrap align-items-center gap-2">
-              <span className="small text-muted">Jornada:</span>
+            <div className="filter-group">
+              <span className="filter-label">Jornada</span>
               <button
                 className={`btn btn-outline-secondary btn-sm rounded-pill ${matchdayFilter === undefined ? 'active' : ''}`}
                 onClick={() => setMatchdayFilter(undefined)}
