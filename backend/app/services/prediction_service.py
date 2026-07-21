@@ -12,6 +12,7 @@ from ..dixoncoles import predict_match
 from ..models import Equipo, Partido, Torneo
 
 logger = logging.getLogger(__name__)
+FINAL_STATUSES = {"FT", "AET", "PEN", "FINISHED"}
 
 
 def _norm(s: str) -> str:
@@ -104,6 +105,11 @@ def predict_partido(partido_id: int, sel_model: dict | None, club_model: dict | 
 
     if not partido.fixture_id:
         return _state("insufficient_data", "El partido no tiene fixture_id asociado")
+    if str(partido.estado or "").upper() in FINAL_STATUSES:
+        return _state(
+            "insufficient_data",
+            "El partido ya finalizó; las predicciones solo están disponibles para partidos pendientes o en vivo",
+        )
     if not home_name_for_model or not away_name_for_model:
         return _state("insufficient_data", "Faltan nombres de equipos para generar la predicción")
 
