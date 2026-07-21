@@ -26,6 +26,7 @@ def _create_match(
     away_name: str = "Brazil",
     home_type: str = "seleccion",
     away_type: str = "seleccion",
+    status: str = "NS",
 ) -> None:
     with Session(engine) as session:
         torneo = Torneo(
@@ -64,7 +65,7 @@ def _create_match(
                 home_team=home_name,
                 away_team=away_name,
                 tournament=torneo.nombre_canonico,
-                estado="NS",
+                estado=status,
             )
         )
         session.commit()
@@ -102,6 +103,17 @@ def test_predict_partido_without_fixture_id_is_insufficient_data():
 
     assert data["status"] == "insufficient_data"
     assert "fixture_id" in data["message"]
+    assert "home_win" not in data
+
+
+def test_predict_partido_finished_match_is_not_predicted():
+    _create_match(fixture_id=9006, status="FT")
+
+    data = prediction_service.predict_partido(9006, _model("Argentina", "Brazil"), None)
+
+    assert data["status"] == "insufficient_data"
+    assert "finalizó" in data["message"]
+    assert "score_matrix" not in data
     assert "home_win" not in data
 
 
