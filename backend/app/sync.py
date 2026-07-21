@@ -46,9 +46,9 @@ CLUB_COMPETITIONS = {
     "CL": "Champions League",
 }
 
-# Últimas 3 temporadas disponibles en free tier (football-data.org)
-# Junio 2026 -> season 2023, 2024, 2025
-CLUB_SEASONS = [2023, 2024, 2025]
+# Temporadas disponibles a sincronizar desde football-data.org.
+# season=2026 corresponde a la temporada 2026/2027 en ligas de clubes.
+CLUB_SEASONS = [2023, 2024, 2025, 2026]
 
 
 def _parse_datetime(dt_str: Optional[str]) -> Optional[datetime]:
