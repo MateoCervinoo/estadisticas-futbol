@@ -74,17 +74,23 @@ def _compute_xg_from_metrics(metrics: Dict[str, Any]) -> (Optional[float], Optio
     Fórmula simple y explicable:
     xG = (shots_inside_box * 0.13) + (shots_outside_box * 0.04)
 
-    Si faltan métricas para un equipo, se asume 0 para esa métrica.
+    Si faltan métricas completas, no se calcula xG para evitar guardar 0.0
+    como si fuese un dato real.
     """
     try:
         inside = metrics.get('shots_inside_box', {})
         outside = metrics.get('shots_outside_box', {})
 
-        home_inside = inside.get('home') or 0
-        away_inside = inside.get('away') or 0
+        required_values = (
+            inside.get('home'),
+            inside.get('away'),
+            outside.get('home'),
+            outside.get('away'),
+        )
+        if any(value is None for value in required_values):
+            return None, None
 
-        home_out = outside.get('home') or 0
-        away_out = outside.get('away') or 0
+        home_inside, away_inside, home_out, away_out = required_values
 
         home_xg = float(home_inside) * 0.13 + float(home_out) * 0.04
         away_xg = float(away_inside) * 0.13 + float(away_out) * 0.04
