@@ -67,6 +67,26 @@ body {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.app-footer {
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 1.35rem 0;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(16px);
+}
+
+.app-version-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(22, 163, 74, 0.22);
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  color: #14532d;
+  font-size: 0.78rem;
+  font-weight: 900;
+  background: #dcfce7;
+}
+
 .fw-black {
   font-weight: 950;
 }
@@ -296,8 +316,7 @@ body {
 }
 
 .football-loader {
-  display: grid;
-  justify-content: center;
+  padding: 1rem 0;
 }
 
 .match-card {
@@ -442,57 +461,71 @@ body {
   background: #f1f5f9;
 }
 
-.football-loader-field {
-  position: relative;
-  width: min(320px, 78vw);
-  height: 92px;
-  overflow: hidden;
-  border-radius: 8px;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      #2f8f46 0,
-      #2f8f46 34px,
-      #287d3d 34px,
-      #287d3d 68px
-    );
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28);
+.skeleton-card {
+  pointer-events: none;
 }
 
-.football-loader-field::before {
+.skeleton-line,
+.skeleton-pill,
+.skeleton-dot,
+.skeleton-crest,
+.skeleton-score,
+.skeleton-chip {
+  overflow: hidden;
+  position: relative;
+  background: #e2e8f0;
+}
+
+.skeleton-line::after,
+.skeleton-pill::after,
+.skeleton-dot::after,
+.skeleton-crest::after,
+.skeleton-score::after,
+.skeleton-chip::after {
   content: "";
   position: absolute;
-  inset: 16px 22px;
-  border: 2px solid rgba(255,255,255,0.55);
-  border-radius: 7px;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
 }
 
-.football-loader-ball {
-  position: absolute;
-  left: 42px;
-  bottom: 28px;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 50%, #111 0 4px, transparent 5px),
-    radial-gradient(circle at 35% 32%, #111 0 3px, transparent 4px),
-    radial-gradient(circle at 65% 34%, #111 0 3px, transparent 4px),
-    radial-gradient(circle at 38% 68%, #111 0 3px, transparent 4px),
-    radial-gradient(circle at 68% 66%, #111 0 3px, transparent 4px),
-    #fff;
-  animation: football-bounce 1.1s ease-in-out infinite;
+.skeleton-line {
+  height: 0.82rem;
+  border-radius: 999px;
 }
 
-.football-loader-shadow {
-  position: absolute;
-  left: 38px;
-  bottom: 22px;
-  width: 38px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.24);
-  animation: football-shadow 1.1s ease-in-out infinite;
+.skeleton-line-title { width: min(16rem, 56vw); height: 1rem; }
+.skeleton-line-copy { width: min(24rem, 68vw); }
+.skeleton-line-meta { width: 8rem; }
+.skeleton-line-team { width: min(8.5rem, 24vw); height: 1rem; }
+
+.skeleton-pill {
+  width: 6.5rem;
+  height: 2rem;
+  border-radius: 999px;
+}
+
+.skeleton-dot,
+.skeleton-crest {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+}
+
+.skeleton-score {
+  min-height: 2.7rem;
+}
+
+.skeleton-chip {
+  width: 5.8rem;
+  height: 1.55rem;
+  border-radius: 999px;
+}
+
+.skeleton-chip.short {
+  width: 4.4rem;
 }
 
 @keyframes pulse-animation {
@@ -500,14 +533,8 @@ body {
   50% { opacity: 0.5; }
 }
 
-@keyframes football-bounce {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  50% { transform: translate(198px, -30px) rotate(250deg); }
-}
-
-@keyframes football-shadow {
-  0%, 100% { transform: translateX(0) scaleX(1); opacity: 0.24; }
-  50% { transform: translateX(198px) scaleX(0.72); opacity: 0.14; }
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
 }
 
 .analysis-shell {

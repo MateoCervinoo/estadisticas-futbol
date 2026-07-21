@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import FootballLoader from '../../../components/FootballLoader'
 import {
   getTablaPosiciones, getBracket, getPartidos, getPartidoEstadisticas, getTorneoTemporadas,
   getPartidoFilterMetadata, getTorneoCobertura,
@@ -260,7 +261,7 @@ export default function TorneoDetailPage() {
       <TournamentTabs activeTab={activeTab} onChange={setActiveTab} />
 
       {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <div className="text-muted">Cargando...</div>}
+      {loading && <FootballLoader />}
       {!loading && !error && temporadas.length === 0 && <div className="text-muted text-center py-5">No hay temporadas cargadas para este torneo.</div>}
 
       {/* ──────── TAB: CALENDARIO ──────── */}

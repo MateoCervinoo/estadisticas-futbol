@@ -40,6 +40,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </nav>
         {children}
+        <footer className="app-footer">
+          <div className="container d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+            <div>
+              <strong>Pizarrón Estadístico</strong>
+              <span className="text-muted ms-2">Calendario, datos y predicciones para seguir el juego con contexto.</span>
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <span className="app-version-badge">v1.0</span>
+              <span className="text-muted small">Datos sincronizados desde fuentes externas</span>
+            </div>
+          </div>
+        </footer>
         <script
           src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
           crossOrigin="anonymous"
